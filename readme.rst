@@ -15,7 +15,6 @@ Data Organisation
     * camera metadata (meta.tdms)
  * Organised by session:
     * folder name should start with: YYMMDD_mouseID
-    * saved in: ardbeg/NeuropixelsData/Raw
 
 
 Data Processing
