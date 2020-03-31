@@ -30,3 +30,19 @@ Resources
  * SpikeInterface: https://github.com/SpikeInterface/spiketoolkit
  * Kilosort2: https://github.com/MouseLand/Kilosort2
  * Allen Institute pixels spike sorting: https://github.com/alleninstitute/ecephys_spike_sorting
+
+
+Pipeline
+--------
+
+[raw] Raw data for compression.
+
+[interim]    raw spike data                   behavioural tdms            LFP data    camera
+                   ┃                                 ┃                       ┃           ┃
+                   v                                 ┃                       ┃           ┃
+              spike sorting                          v                       v           v
+           downsample to 1kHz            create action labels 1kHz        resample      DLC +
+           phy manual curation                       ┃                       ┃        resample
+                   ┃                                 ┃                       ┃           ┃
+                   v                                 v                       v           v
+[processed]   spike data                       action labels             1kHz LFP   1kHz DLC coordinates
