@@ -1,7 +1,5 @@
 
 
-from nptdms import TdmsFile
- 
 from pixels import ioutils
 
 

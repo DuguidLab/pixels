@@ -6,18 +6,18 @@ data and run subsequent analyses.
 
 import os
 
-from pixels.session import Session, list_sessions
+from pixels.session import Session, get_sessions
 
 
 class Experiment:
     def __init__(self, mouse_ids, data_dir, meta_dir):
         if not isinstance(mouse_ids, (list, tuple, set)):
-            mouse_ids = Tuple(mouse_ids)
+            mouse_ids = [mouse_ids]
 
         self.mouse_ids = mouse_ids
-        self.data_dir = data_dir
-        self.meta_dir = meta_dir
-        self.sessions = list_sessions(mouse_ids, data_dir, meta_dir)
+        self.data_dir = os.path.expanduser(data_dir)
+        self.meta_dir = os.path.expanduser(meta_dir)
+        self.sessions = get_sessions(mouse_ids, self.data_dir, self.meta_dir)
 
     def extract_spikes(self, resample=True):
         """
