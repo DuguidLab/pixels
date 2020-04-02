@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+reach.egg-info
+venv
+dist
+build
+docsrc/_build
