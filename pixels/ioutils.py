@@ -5,6 +5,7 @@ This module contains helper functions for reading and writing files.
 
 import glob
 import os
+from pathlib import Path
 from nptdms import TdmsFile
 
 
@@ -35,6 +36,24 @@ def read_tdms(path, groups=None):
                 data.append(group_data)
             df = pd.concat(data, axis=1)
     return df
+
+
+def read_meta(path):
+    """
+    Read metadata from a .meta file file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the meta file to be read.
+
+    """
+    metadata = {}
+    for entry in Path(path).read_text().split("\n"):
+        if entry:
+            key, value = entry.split("=")
+            metadata[key] = value
+    return metadata
 
 
 def get_data_files(data_dir, session_name):

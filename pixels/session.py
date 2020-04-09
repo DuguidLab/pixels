@@ -32,9 +32,17 @@ class Session:
 
         """
         self.name = name
-        self.metadata = metadata
         self.data_dir = data_dir
-        self.recordings = ioutils.get_data_files(data_dir, name)
+        self.metadata = metadata
+        self.files = ioutils.get_data_files(data_dir, name)
+
+        self.spike_meta = []
+        self.lfp_meta = []
+        for recording in self.files:
+            spike_meta = ioutils.read_meta(recording['spike_meta'])
+            self.spike_meta.append(spike_meta)
+            lfp_meta = ioutils.read_meta(recording['lfp_meta'])
+            self.lfp_meta.append(lfp_meta)
 
     def extract_spikes(self, resample=True):
         """
@@ -50,7 +58,7 @@ class Session:
         """
         Process behavioural data from raw tdms files.
         """
-        for recording in self.recordings:
+        for recording in self.files:
             behavioural_data = ioutils.read_tdms(recording['behaviour'])
             sync_channel = ioutils.read_tdms(
                 recording['spike_data'], "/'NpxlSync_Signal'/'0'"
