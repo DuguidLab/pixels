@@ -36,13 +36,8 @@ class Session:
         self.metadata = metadata
         self.files = ioutils.get_data_files(data_dir, name)
 
-        self.spike_meta = []
-        self.lfp_meta = []
-        for recording in self.files:
-            spike_meta = ioutils.read_meta(recording['spike_meta'])
-            self.spike_meta.append(spike_meta)
-            lfp_meta = ioutils.read_meta(recording['lfp_meta'])
-            self.lfp_meta.append(lfp_meta)
+        self.spike_meta = [ioutils.read_meta(f['spike_meta']) for f in self.files]
+        self.lfp_meta = [ioutils.read_meta(f['lfp_meta']) for f in self.files]
 
     def extract_spikes(self, resample=True):
         """
@@ -56,12 +51,17 @@ class Session:
 
     def process_behaviour(self, resample=True):
         """
-        Process behavioural data from raw tdms files.
+        Process behavioural data from raw tdms and align to neuropixels data.
         """
-        for recording in self.files:
+        for rec_num, recording in enumerate(self.files):
+            print("Reading behaviour TDMS...")
             behavioural_data = ioutils.read_tdms(recording['behaviour'])
-            sync_channel = ioutils.read_tdms(
-                recording['spike_data'], "/'NpxlSync_Signal'/'0'"
+
+            print("Reading neuropixels sync channel...")
+            sync_channel = ioutils.read_bin(
+                recording['spike_data'],
+                self.spike_meta[rec_num]['nSavedChans'],
+                channel=384,
             )
 
     def process_motion_tracking(self, resample=True):
