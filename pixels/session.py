@@ -5,15 +5,21 @@ This module manipulates files and analyses data at the session level.
 
 import datetime
 import json
+import numpy as np
 import os
+import scipy.signal
+import time
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 from pixels import ioutils
-
-
-_SAMPLE_RATE = 1000
+from pixels import signal
 
 
 class Session:
+
+    sample_rate = 1000
+
     def __init__(self, name, metadata=None, data_dir=None):
         """
         This class represents a single individual recording session.
@@ -39,32 +45,49 @@ class Session:
         self.spike_meta = [ioutils.read_meta(f['spike_meta']) for f in self.files]
         self.lfp_meta = [ioutils.read_meta(f['lfp_meta']) for f in self.files]
 
-    def extract_spikes(self, resample=True):
+    def extract_spikes(self):
         """
         Extract the spikes from raw spike data.
         """
 
-    def process_lfp(self, resample=True):
+    def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data.
         """
 
-    def process_behaviour(self, resample=True):
+    def process_behaviour(self):
         """
         Process behavioural data from raw tdms and align to neuropixels data.
         """
         for rec_num, recording in enumerate(self.files):
-            print("Reading behaviour TDMS...")
+            print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
+
+            print("[1/9] Loading behaviour TDMS")
             behavioural_data = ioutils.read_tdms(recording['behaviour'])
 
-            print("Reading neuropixels sync channel...")
-            sync_channel = ioutils.read_bin(
+            print("[2/9] Loading neuropixels sync channel")
+            sync_pixels = ioutils.read_bin(
                 recording['spike_data'],
                 self.spike_meta[rec_num]['nSavedChans'],
                 channel=384,
             )
+            sync_pixels = syncpixels[:15000000]
 
-    def process_motion_tracking(self, resample=True):
+            print(f"[3/9] Downsampling to {self.sample_rate} Hz")
+            sync_behav = signal.resample(behavioural_data["/'NpxlSync_Signal'/'0'"], 25000)
+            sync_behav = (sync_behav > 2.5).astype(np.int8)
+            sync_pixels = signal.resample(sync_pixels, 30000)
+            sync_pixels = (sync_pixels > 35).astype(np.int8).squeeze()
+
+            print(f"[4/9] Finding lag between sync channels")
+            plot_path = Path(recording['spike_data'])
+            plot_path = plot_path.with_name(plot_path.stem + '.png')
+            lag, match = signal.find_sync_lag(
+                sync_behav, sync_pixels, length=60000, plot=plot_path
+            )
+            raise Exception
+
+    def process_motion_tracking(self):
         """
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data.
