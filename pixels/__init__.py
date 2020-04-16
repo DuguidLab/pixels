@@ -1,12 +1,13 @@
+"""
+This library provides tools that can be used to manipulate and analyse neuropixels data
+aligned to trial-organised behavioural data.
+"""
 
 
 import os
 import json
 
-from .experiment import Experiment
-
-
-__all__ = ('Experiment', )
+from pixels.experiment import Experiment
 
 
 def select_mice(**kwargs):

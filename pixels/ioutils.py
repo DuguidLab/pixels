@@ -3,7 +3,9 @@ This module contains helper functions for reading and writing files.
 """
 
 
+import datetime
 import glob
+import json
 import os
 import numpy as np
 import pandas as pd
@@ -35,8 +37,9 @@ def get_data_files(data_dir, session_name):
         - camera_data
         - camera_meta
     """
-    if session_name not in data_dir:
-        data_dir = glob.glob(os.path.join(data_dir, f'{session_name}*'))[0]
+    data_dir = Path(data_dir).expanduser()
+    if session_name != data_dir.stem:
+        data_dir = list(data_dir.glob(f'{session_name}*'))[0]
     files = []
 
     spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin')
@@ -132,7 +135,6 @@ def read_tdms(path, groups=None):
     """
     with TdmsFile.read(path) as tdms_file:
         if groups is None:
-            #groups = [group.name for group in tdms_file.groups()]
             df = tdms_file.as_dataframe()
         else:
             data = []
@@ -143,3 +145,52 @@ def read_tdms(path, groups=None):
                 data.append(group_data)
             df = pd.concat(data, axis=1)
     return df
+
+
+def get_sessions(mouse_ids, data_dir, meta_dir):
+    """
+    Get a list of recording sessions for the specified mice, excluding those whose
+    metadata contain '"exclude" = True'.
+
+    Parameters
+    ----------
+    mouse_ids : list of strs
+        List of mouse IDs.
+
+    data_dir : str
+        The path to the folder containing data for all sessions. This is searched for
+        available sessions.
+
+    meta_dir : str
+        The path to the folder containing training metadata JSON files.
+
+    """
+    if not isinstance(mouse_ids, (list, tuple, set)):
+        mouse_ids = [mouse_ids]
+    data_dir = Path(data_dir).expanduser()
+    meta_dir = Path(meta_dir).expanduser()
+    sessions = []
+
+    for mouse in mouse_ids:
+        mouse_sessions = list(data_dir.glob(f'*{mouse}*'))
+
+        if mouse_sessions:
+            meta_file = meta_dir / (mouse + '.json') 
+            with meta_file.open() as fd:
+                mouse_meta = json.load(fd)
+            session_dates = [
+                datetime.datetime.strptime(s.stem[0:6], '%y%m%d') for s in mouse_sessions
+            ]
+            for session in mouse_meta:
+                meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
+                for index, ses_date in enumerate(session_dates):
+                    if ses_date == meta_date and not session.get('exclude', False):
+                        sessions.append(dict(
+                            sessions=mouse_sessions[index].stem,
+                            metadata=session,
+                            data_dir=data_dir,
+                        ))
+        else:
+            print(f'Found no sessions for: {mouse}')
+
+    return sessions
