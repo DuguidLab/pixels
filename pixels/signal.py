@@ -7,6 +7,8 @@ import scipy.signal
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from pathlib import Path
 
 
 def resample(array, from_hz, to_hz, padtype=None):
@@ -44,6 +46,32 @@ def resample(array, from_hz, to_hz, padtype=None):
     return array
 
 
+def binarise(data):
+    """
+    This normalises an array to between 0 and 1 and then makes all values below 0.5
+    equal to 0 and all values above 0.5 to 1. The array is returned as np.int8 to save
+    some memory when using large datasets.
+
+    Parameters
+    ----------
+    data : numpy.ndarray or pandas.DataFrame
+        If the data is a dataframe then each column will individually be binarised.
+
+    """
+    if isinstance(data, pd.DataFrame):
+        for column in data.columns:
+            data[column] = _binarise_real(data[column])
+    else:
+        data = _binarise_real(data)
+
+    return data
+
+
+def _binarise_real(data):
+    data = (data - min(data)) / max(data)
+    return (data > 0.5).astype(np.int8)
+
+
 def find_sync_lag(array1, array2, length=None, plot=False):
     """
     Find the lag between two arrays where they have the greatest number of the same
@@ -61,7 +89,8 @@ def find_sync_lag(array1, array2, length=None, plot=False):
 
     length : int, optional
         The distance to traverse the two arrays looking for the best match. Default:
-        length of array1.
+        half the length of array1. This cannot be greater than half the length of either
+        array.
 
     plot : string, optional
         False (default), or a path specifying where to save a png of the best match.  If
@@ -69,7 +98,10 @@ def find_sync_lag(array1, array2, length=None, plot=False):
 
     """
     if length is None:
-        length = len(array1)
+        length = len(array1) // 2
+
+    if len(array1) // 2 < length or len(array2) // 2 < length:
+        raise Exception(f'Arrays must be at least twice the size of length parameter.')
 
     sync_p = []
     for i in range(length):
@@ -95,10 +127,16 @@ def find_sync_lag(array1, array2, length=None, plot=False):
     if plot:
         plot = Path(plot)
         if plot.exists():
-            plot = plot.with_name(plot.stem + time.strftime('%y%m%d-%H%M%S') + '.png')
+            plot = plot.with_name(plot.stem + '_' + time.strftime('%y%m%d-%H%M%S') + '.png')
         fig, axes = plt.subplots(nrows=2, ncols=1)
-        raise Exception
-        # CONTINUE HERE WITH PLOTTING THE TWO ALIGNED SIGNALS ON SUBPLOTS
-        axes[0].plot()
+        plot_length = min(length, 5000)
+        if lag >= 0:
+            axes[0].plot(array1[lag:lag + plot_length])
+            axes[1].plot(array2[:plot_length])
+        else:
+            axes[0].plot(array1[:plot_length])
+            axes[1].plot(array2[-lag:-lag + plot_length])
+        fig.savefig(plot)
+        print(f"Sync plot saved at: {plot}")
 
     return lag, match
