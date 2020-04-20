@@ -1,5 +1,5 @@
 """
-This module provides lever-push specific operations.
+This module provides gonogo-specific operations.
 """
 
 
@@ -7,7 +7,7 @@ from pixels import signal
 from pixels.behaviours import Behaviour
 
 
-class LeverPush(Behaviour):
+class GoNoGo(Behaviour):
 
     def _extract_action_labels(self, behavioural_data):
         behavioural_data = signal.binarise(behavioural_data)
@@ -25,5 +25,6 @@ class LeverPush(Behaviour):
         tone_onsets = np.where((tone_signal[:-1] == 0) & (tone_signal[1:] == 1))[0]
 
 
+        raise Exception
 
         return action_labels

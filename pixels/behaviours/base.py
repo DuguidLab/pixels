@@ -10,7 +10,6 @@ import numpy as np
 import os
 import scipy.signal
 import time
-import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -104,9 +103,9 @@ class Behaviour(ABC):
             print(f"[6/6] Saving action labels to:")
             save_path = self.data_dir / self.name / f'action_labels_{rec_num}.npy'
             print(f"      {save_path}")
-            action_labels.save(save_path)
+            np.save(save_path, action_labels)
 
-        print(f">>>>> Done!")
+        print(">>>>> Done!")
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
