@@ -46,66 +46,104 @@ class Behaviour(ABC):
         self.spike_meta = [ioutils.read_meta(f['spike_meta']) for f in self.files]
         self.lfp_meta = [ioutils.read_meta(f['lfp_meta']) for f in self.files]
 
-    def extract_spikes(self):
-        """
-        Extract the spikes from raw spike data.
-        """
-
-    def process_lfp(self):
-        """
-        Process the LFP data from the raw neural recording data.
-        """
+        self._action_labels = []
+        self._lag = [None] * len(self.files)
 
     def process_behaviour(self):
         """
         Process behavioural data from raw tdms and align to neuropixels data.
         """
+        self._action_labels = [None] * len(self.files)
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
 
-            print("[1/6] Loading behaviour TDMS")
+            print(f"> Loading behaviour TDMS")
             behavioural_data = ioutils.read_tdms(recording['behaviour'])
 
-            print("[2/6] Loading neuropixels sync channel")
+            print(f"> Downsampling to {self.sample_rate} Hz")
+            behav_array = signal.resample(behavioural_data, 25000, self.sample_rate)
+            behavioural_data.iloc[:len(behav_array), :] = behav_array
+            behavioural_data = behavioural_data[:len(behav_array)]
+            del behav_array
+
+            if self._lag[rec_num] is not None:
+                lag = self._lag[rec_num]
+            else:
+                lag = self.sync_data(rec_num, behavioural_data=behavioural_data)
+
+            print(f"> Extracting action labels")
+            if lag > 0:
+                behavioural_data = behavioural_data[lag:]
+            if len(behavioural_data) > pixels_length:
+                behavioural_data = behavioural_data[:pixels_length]
+            behavioural_data.index = range(len(behavioural_data))
+            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
+
+            print(f"> Saving action labels to:")
+            print(f"  {recording['action_labels']}")
+            np.save(recording['action_labels'], self._action_labels[rec_num])
+
+        print("> Done!")
+
+    def sync_data(self, rec_num, behavioural_data=None, sync_channel=None):
+        """
+        This method will calculate and return the lag between the behavioural data and
+        the neuropixels data for each recording.
+
+        behavioural_data and sync_channel will be loaded from file and downsampled if
+        not provided, otherwise if provided they must already be the same sample
+        frequency.
+
+        Parameters
+        ----------
+        rec_num : int
+            The recording number, i.e. index of self.files to get file paths.
+
+        behavioural_data : pandas.DataFrame, optional
+            The behavioural data loaded from the TDMS file.
+
+        sync_channel : np.ndarray, optional
+            The sync channel from either the spike or LFP data.
+
+        Returns
+        -------
+        lag : int
+            The index within the behavioural_data that the neuropixels recording begins.
+            This can be negative, indicating that the neuropixels data began this many
+            sample points before the behavioural_data.
+
+        """
+        print("> Finding lag between sync channels")
+        recording = self.files[rec_num]
+
+        if behavioural_data is None:
+            print("  Loading behaviour TDMS")
+            behavioural_data = ioutils.read_tdms(recording['behaviour'])
+
+        if sync_channel is None:
+            print("  Loading neuropixels sync channel")
             sync_pixels = ioutils.read_bin(
                 recording['spike_data'],
                 self.spike_meta[rec_num]['nSavedChans'],
                 channel=384,
             )
             pixels_length = sync_pixels.size
-            sync_pixels = sync_pixels[:120000 * 30 * 2]
-
-            print(f"[3/6] Downsampling to {self.sample_rate} Hz")
-            behav_array = signal.resample(behavioural_data, 25000, self.sample_rate)
-            behavioural_data.iloc[:len(behav_array), :] = behav_array
-            behavioural_data = behavioural_data[:len(behav_array)]
-            del behav_array
-            sync_behav = signal.binarise(behavioural_data["/'NpxlSync_Signal'/'0'"])
+            sync_pixels = sync_pixels[:120000 * 30 * 2]  # 2 mins, 30kHz, back/forward
             sync_pixels = signal.resample(sync_pixels, 30000, self.sample_rate)
-            sync_pixels = signal.binarise(sync_pixels).squeeze()
             pixels_length //= 30
 
-            print(f"[4/6] Finding lag between sync channels")
-            plot_path = Path(recording['spike_data'])
-            plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
-            lag, match = signal.find_sync_lag(
-                sync_behav, sync_pixels, length=120000, plot=plot_path,
-            )
+        sync_behav = signal.binarise(behavioural_data["/'NpxlSync_Signal'/'0'"])
+        sync_pixels = signal.binarise(sync_pixels).squeeze()
 
-            print(f"[5/6] Extracting action labels")
-            if lag > 0:
-                behavioural_data = behavioural_data[lag:]
-            if len(behavioural_data) > pixels_length:
-                behavioural_data = behavioural_data[:pixels_length]
-            behavioural_data.index = range(len(behavioural_data))
-            action_labels = self._extract_action_labels(behavioural_data)
+        print("  Finding lag")
+        plot_path = Path(recording['spike_data'])
+        plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
+        lag, match = signal.find_sync_lag(
+            sync_behav, sync_pixels, length=120000, plot=plot_path,
+        )
 
-            print(f"[6/6] Saving action labels to:")
-            save_path = self.data_dir / self.name / f'action_labels_{rec_num}.npy'
-            print(f"      {save_path}")
-            np.save(save_path, action_labels)
-
-        print(">>>>> Done!")
+        self._lag[rec_num] = lag
+        return lag
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
@@ -123,6 +161,24 @@ class Behaviour(ABC):
         action_labels : 1D numpy.ndarray
             A 1-dimensional array of actions of equal length to the behavioural_data.
 
+        """
+
+    def get_action_labels(self):
+        if not self._action_labels:
+            for rec_num, recording in enumerate(self.files):
+                self._action_labels[rec_num] = np.load(recording['action_labels'])
+        return self._action_labels
+
+    def process_lfp(self):
+        """
+        Process the LFP data from the raw neural recording data.
+        """
+        for rec_num, recording in enumerate(self.files):
+            print(f">>>>> Processing LFP for recording {rec_num + 1} of {len(self.files)}")
+
+    def extract_spikes(self):
+        """
+        Extract the spikes from raw spike data.
         """
 
     def process_motion_tracking(self):
