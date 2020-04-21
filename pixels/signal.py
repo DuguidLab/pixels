@@ -31,19 +31,29 @@ def resample(array, from_hz, to_hz, padtype=None):
         pretends the ends are extended using the array's minimum.
 
     """
+    from_hz = float(from_hz)
+    to_hz = float(to_hz)
+
     if from_hz == to_hz:
         return array
+
     elif from_hz > to_hz:
         up = 1
-        down = from_hz / to_hz
-    elif from_hz < to_hz:
-        up = to_hz / from_hz
-        down = 1
+        factor = from_hz / to_hz
+        down = factor
+        while not down.is_integer():
+            down += factor
+            up += 1
 
-    array = scipy.signal.resample_poly(
-        array, up, down, padtype=padtype or 'minimum',
-    )
-    return array
+    elif from_hz < to_hz:
+        factor = to_hz / from_hz
+        up = factor
+        down = 1
+        while not up.is_integer():
+            up += factor
+            down += 1
+
+    return scipy.signal.resample_poly(array, up, down, padtype=padtype or 'minimum')
 
 
 def binarise(data):
@@ -116,7 +126,7 @@ def find_sync_lag(array1, array2, length=None, plot=False):
         sync_n.append(100 * matches / length)
     match_n = max(sync_n)
     lag_n = sync_n.index(match_n)
-    
+
     if match_p > match_n:
         lag = lag_p
         match = match_p

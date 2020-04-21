@@ -25,7 +25,8 @@ class Experiment:
             Class definition subclassing from behaviours.Behaviour.
 
         data_dir : str
-            Path to the top-level folder containing data for these mice.
+            Path to the top-level folder containing data for these mice. This folder
+            should contain these folders: raw, interim, processed
 
         meta_dir : str
             Path to the folder containing training metadata JSON files.
@@ -36,8 +37,8 @@ class Experiment:
 
         self.behaviour = behaviour
         self.mouse_ids = mouse_ids
-        self.data_dir = Path(data_dir)
-        self.meta_dir = Path(meta_dir)
+        self.data_dir = Path(data_dir).expanduser()
+        self.meta_dir = Path(meta_dir).expanduser()
 
         self.sessions = []
         for session in ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir):
@@ -49,19 +50,19 @@ class Experiment:
                 )
             )
 
-    def extract_spikes(self, resample=True):
+    def extract_spikes(self):
         """
         Extract the spikes from raw spike data for all sessions.
         """
         for session in self.sessions:
-            session.extract_spikes(resample=resample)
+            session.extract_spikes()
 
-    def process_lfp(self, resample=True):
+    def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data for all sessions.
         """
         for session in self.sessions:
-            session.process_lfp(resample=resample)
+            session.process_lfp()
 
     def process_behaviour(self):
         """

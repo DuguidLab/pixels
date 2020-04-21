@@ -29,6 +29,7 @@ def get_data_files(data_dir, session_name):
     -------
     A list of dicts, where each dict corresponds to one recording. The dict will contain
     these keys to identify data files:
+
         - spike_data
         - spike_meta
         - lfp_data
@@ -36,12 +37,13 @@ def get_data_files(data_dir, session_name):
         - behaviour
         - camera_data
         - camera_meta
+
     """
-    data_dir = Path(data_dir).expanduser()
     if session_name != data_dir.stem:
         data_dir = list(data_dir.glob(f'{session_name}*'))[0]
     files = []
 
+    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin')
     spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin')
     spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta')
     lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin')
@@ -58,16 +60,16 @@ def get_data_files(data_dir, session_name):
 
     for num, spike_recording in enumerate(spike_data):
         recording = {}
-        recording['spike_data'] = spike_recording
-        recording['spike_meta'] = spike_meta[num]
-        recording['lfp_data'] = lfp_data[num]
-        recording['lfp_meta'] = lfp_meta[num]
+        recording['spike_data'] = Path(spike_recording)
+        recording['spike_meta'] = Path(spike_meta[num])
+        recording['lfp_data'] = Path(lfp_data[num])
+        recording['lfp_meta'] = Path(lfp_meta[num])
         if len(behaviour) == len(spike_data):
-            recording['behaviour'] = behaviour[num]
+            recording['behaviour'] = Path(behaviour[num])
         else:
-            recording['behaviour'] = behaviour[0]
-        recording['camera_data'] = camera_data[num]
-        recording['camera_meta'] = camera_meta[num]
+            recording['behaviour'] = Path(behaviour[0])
+        recording['camera_data'] = Path(camera_data[num])
+        recording['camera_meta'] = Path(camera_meta[num])
         recording['action_labels'] = data_dir / f'action_labels_{num}.npy'
         files.append(recording)
 
@@ -80,12 +82,12 @@ def read_meta(path):
 
     Parameters
     ----------
-    path : str
+    path : pathlib.Path
         Path to the meta file to be read.
 
     """
     metadata = {}
-    for entry in Path(path).read_text().split("\n"):
+    for entry in path.read_text().split("\n"):
         if entry:
             key, value = entry.split("=")
             metadata[key] = value
@@ -168,8 +170,6 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     """
     if not isinstance(mouse_ids, (list, tuple, set)):
         mouse_ids = [mouse_ids]
-    data_dir = Path(data_dir).expanduser()
-    meta_dir = Path(meta_dir).expanduser()
     sessions = []
 
     for mouse in mouse_ids:

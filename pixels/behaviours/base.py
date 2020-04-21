@@ -11,7 +11,6 @@ import os
 import scipy.signal
 import time
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 from pixels import ioutils
 from pixels import signal
@@ -21,7 +20,7 @@ class Behaviour(ABC):
 
     sample_rate = 1000
 
-    def __init__(self, name, metadata=None, data_dir=None):
+    def __init__(self, name, data_dir, metadata=None):
         """
         This class represents a single individual recording session.
 
@@ -30,12 +29,12 @@ class Behaviour(ABC):
         name : str
             The name of the session in the form YYMMDD_mouseID.
 
-        metadata : dict (optional)
+        data_dir : pathlib.Path
+            The folder in which data for this session is stored.
+
+        metadata : dict, optional
             A dictionary of metadata for this session. This is typically taken from the
             session's JSON file.
-
-        data_dir : str (optional)
-            The folder in which data for this session is stored.
 
         """
         self.name = name
@@ -144,7 +143,7 @@ class Behaviour(ABC):
         sync_channel = signal.binarise(sync_channel).squeeze()
 
         print("  Finding lag")
-        plot_path = Path(recording['spike_data'])
+        plot_path = recording['spike_data']
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
             sync_behav, sync_channel, length=120000, plot=plot_path,
@@ -207,7 +206,7 @@ class Behaviour(ABC):
             else:
                 lag_start, lag_end = self.sync_data(rec_num, sync_channel=lfp_data[:, -1])
 
-            output = Path(recording['lfp_data'])
+            output = recording['lfp_data']
             output = output.with_name(output.stem + '_processed.npy')
             print(f"> Saving data to {output}")
             lfp_data = lfp_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
