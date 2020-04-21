@@ -68,6 +68,7 @@ def get_data_files(data_dir, session_name):
             recording['behaviour'] = behaviour[0]
         recording['camera_data'] = camera_data[num]
         recording['camera_meta'] = camera_meta[num]
+        recording['action_labels'] = data_dir / f'action_labels_{num}.npy'
         files.append(recording)
 
     return files
