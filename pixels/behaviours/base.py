@@ -72,7 +72,7 @@ class Behaviour(ABC):
                 lag_start, lag_end = self.sync_data(rec_num, behavioural_data=behavioural_data)
 
             print(f"> Extracting action labels")
-            behavioural_data = behavioural_data[max(lag_start, 0):-max(lag_end, 0)]
+            behavioural_data = behavioural_data[max(lag_start, 0):-1-max(lag_end, 0)]
             behavioural_data.index = range(len(behavioural_data))
             self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
 
@@ -125,28 +125,31 @@ class Behaviour(ABC):
 
         if sync_channel is None:
             print("  Loading neuropixels sync channel")
-            sync_pixels = ioutils.read_bin(
+            sync_channel = ioutils.read_bin(
                 recording['spike_data'],
                 self.spike_meta[rec_num]['nSavedChans'],
                 channel=384,
             )
-            pixels_length = sync_pixels.size
-            sync_pixels = sync_pixels[:120000 * 30 * 2]  # 2 mins, 30kHz, back/forward
-            sync_pixels = signal.resample(sync_pixels, 30000, self.sample_rate)
+            pixels_length = sync_channel.size
+            original_samp_rate = float(recording['imSampRate'])
+            sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, 30kHz, back/forward
+            sync_channel = signal.resample(
+                sync_channel, original_samp_rate, self.sample_rate
+            )
             pixels_length //= 30
         else:
-            pixels_length = len(sync.channel)
+            pixels_length = len(sync_channel)
 
         sync_behav = signal.binarise(behavioural_data["/'NpxlSync_Signal'/'0'"])
-        sync_pixels = signal.binarise(sync_pixels).squeeze()
+        sync_channel = signal.binarise(sync_channel).squeeze()
 
         print("  Finding lag")
         plot_path = Path(recording['spike_data'])
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
-            sync_behav, sync_pixels, length=120000, plot=plot_path,
+            sync_behav, sync_channel, length=120000, plot=plot_path,
         )
-        if match < 85:
+        if match < 90:
             print("  The sync channels did not match very well. Check the plot.")
 
         lag_end = len(behavioural_data) - (lag_start + pixels_length)
@@ -174,7 +177,11 @@ class Behaviour(ABC):
     def get_action_labels(self):
         if not self._action_labels:
             for rec_num, recording in enumerate(self.files):
-                self._action_labels[rec_num] = np.load(recording['action_labels'])
+                if os.path.isfile(recording['action_labels']):
+                    self._action_labels[rec_num] = np.load(recording['action_labels'])
+                else:
+                    print(f"Action labels for recording no. {rec_num} not yet created.")
+                    self._action_labels[rec_num] = None
         return self._action_labels
 
     def process_lfp(self):
@@ -183,6 +190,28 @@ class Behaviour(ABC):
         """
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Processing LFP for recording {rec_num + 1} of {len(self.files)}")
+
+            print("> Mapping LFP data")
+            lfp_data = ioutils.read_bin(
+                recording['lfp_data'],
+                self.lfp_meta[rec_num]['nSavedChans'],
+            )
+
+            print(f"> Downsampling to {self.sample_rate} Hz")
+            lfp_data = signal.resample(
+                lfp_data, self.lfp_meta[rec_num]['imSampRate'], self.sample_rate
+            )
+
+            if self._lag[rec_num] is not None:
+                lag_start, lag_end = self._lag[rec_num]
+            else:
+                lag_start, lag_end = self.sync_data(rec_num, sync_channel=lfp_data[:, -1])
+
+            output = Path(recording['lfp_data'])
+            output = output.with_name(output.stem + '_processed.npy')
+            print(f"> Saving data to {output}")
+            lfp_data = lfp_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
+            np.save(output, lfp_data)
 
     def extract_spikes(self):
         """
