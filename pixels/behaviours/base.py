@@ -67,15 +67,12 @@ class Behaviour(ABC):
             del behav_array
 
             if self._lag[rec_num] is not None:
-                lag = self._lag[rec_num]
+                lag_start, lag_end = self._lag[rec_num]
             else:
-                lag = self.sync_data(rec_num, behavioural_data=behavioural_data)
+                lag_start, lag_end = self.sync_data(rec_num, behavioural_data=behavioural_data)
 
             print(f"> Extracting action labels")
-            if lag > 0:
-                behavioural_data = behavioural_data[lag:]
-            if len(behavioural_data) > pixels_length:
-                behavioural_data = behavioural_data[:pixels_length]
+            behavioural_data = behavioural_data[max(lag_start, 0):-max(lag_end, 0)]
             behavioural_data.index = range(len(behavioural_data))
             self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
 
@@ -107,10 +104,12 @@ class Behaviour(ABC):
 
         Returns
         -------
-        lag : int
-            The index within the behavioural_data that the neuropixels recording begins.
-            This can be negative, indicating that the neuropixels data began this many
-            sample points before the behavioural_data.
+        lag_start : int
+            The number of sample points that the behavioural data has extra at the
+            start of the recording.
+
+        lag_end : int
+            The same as above but at the end.
 
         """
         print("> Finding lag between sync channels")
@@ -119,6 +118,10 @@ class Behaviour(ABC):
         if behavioural_data is None:
             print("  Loading behaviour TDMS")
             behavioural_data = ioutils.read_tdms(recording['behaviour'])
+            behav_array = signal.resample(behavioural_data, 25000, self.sample_rate)
+            behavioural_data.iloc[:len(behav_array), :] = behav_array
+            behavioural_data = behavioural_data[:len(behav_array)]
+            del behav_array
 
         if sync_channel is None:
             print("  Loading neuropixels sync channel")
@@ -131,6 +134,8 @@ class Behaviour(ABC):
             sync_pixels = sync_pixels[:120000 * 30 * 2]  # 2 mins, 30kHz, back/forward
             sync_pixels = signal.resample(sync_pixels, 30000, self.sample_rate)
             pixels_length //= 30
+        else:
+            pixels_length = len(sync.channel)
 
         sync_behav = signal.binarise(behavioural_data["/'NpxlSync_Signal'/'0'"])
         sync_pixels = signal.binarise(sync_pixels).squeeze()
@@ -138,12 +143,15 @@ class Behaviour(ABC):
         print("  Finding lag")
         plot_path = Path(recording['spike_data'])
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
-        lag, match = signal.find_sync_lag(
+        lag_start, match = signal.find_sync_lag(
             sync_behav, sync_pixels, length=120000, plot=plot_path,
         )
+        if match < 85:
+            print("  The sync channels did not match very well. Check the plot.")
 
-        self._lag[rec_num] = lag
-        return lag
+        lag_end = len(behavioural_data) - (lag_start + pixels_length)
+        self._lag[rec_num] = (lag_start, lag_end)
+        return lag_start, lag_end
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
