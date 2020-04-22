@@ -147,6 +147,6 @@ def find_sync_lag(array1, array2, length=None, plot=False):
             axes[0].plot(array1[:plot_length])
             axes[1].plot(array2[-lag:-lag + plot_length])
         fig.savefig(plot)
-        print(f"Sync plot saved at: {plot}")
+        print(f"    Sync plot saved to:\n  {plot}")
 
     return lag, match

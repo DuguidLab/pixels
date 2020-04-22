@@ -40,6 +40,10 @@ class Experiment:
         self.data_dir = Path(data_dir).expanduser()
         self.meta_dir = Path(meta_dir).expanduser()
 
+        self.raw = self.data_dir / 'raw'
+        self.processed = self.data_dir / 'processed'
+        self.interim = self.data_dir / 'interim'
+
         self.sessions = []
         for session in ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir):
             self.sessions.append(

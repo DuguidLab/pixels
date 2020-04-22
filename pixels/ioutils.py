@@ -43,13 +43,13 @@ def get_data_files(data_dir, session_name):
         data_dir = list(data_dir.glob(f'{session_name}*'))[0]
     files = []
 
-    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin')
-    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin')
-    spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta')
-    lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin')
-    lfp_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.meta')
-    behaviour = glob.glob(f'{data_dir}/NeuropixelBehaviour([0-9]).tdms')
-    camera = glob.glob(f'{data_dir}/USB_Camera*.tdms')
+    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin*')
+    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin*')
+    spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta*')
+    lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin*')
+    lfp_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.meta*')
+    behaviour = glob.glob(f'{data_dir}/NeuropixelBehaviour([0-9]).tdms*')
+    camera = glob.glob(f'{data_dir}/USB_Camera*.tdms*')
     camera_data = []
     camera_meta = []
     for match in camera:
@@ -60,20 +60,30 @@ def get_data_files(data_dir, session_name):
 
     for num, spike_recording in enumerate(spike_data):
         recording = {}
-        recording['spike_data'] = Path(spike_recording)
-        recording['spike_meta'] = Path(spike_meta[num])
-        recording['lfp_data'] = Path(lfp_data[num])
-        recording['lfp_meta'] = Path(lfp_meta[num])
+        recording['spike_data'] = original_name(spike_recording)
+        recording['spike_meta'] = original_name(spike_meta[num])
+        recording['lfp_data'] = original_name(lfp_data[num])
+        recording['lfp_meta'] = original_name(lfp_meta[num])
         if len(behaviour) == len(spike_data):
-            recording['behaviour'] = Path(behaviour[num])
+            recording['behaviour'] = original_name(behaviour[num])
         else:
-            recording['behaviour'] = Path(behaviour[0])
-        recording['camera_data'] = Path(camera_data[num])
-        recording['camera_meta'] = Path(camera_meta[num])
-        recording['action_labels'] = data_dir / f'action_labels_{num}.npy'
+            recording['behaviour'] = original_name(behaviour[0])
+        recording['camera_data'] = original_name(camera_data[num])
+        recording['camera_meta'] = original_name(camera_meta[num])
+        recording['action_labels'] = f'action_labels_{num}.npy'
         files.append(recording)
 
     return files
+
+
+def original_name(path):
+    """
+    Get the original name of a file uncompressed.
+    """
+    name = os.path.basename(path)
+    if name.endswith('.tar.gz'):
+        name = name[:-7]
+    return name
 
 
 def read_meta(path):
@@ -171,9 +181,10 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     if not isinstance(mouse_ids, (list, tuple, set)):
         mouse_ids = [mouse_ids]
     sessions = []
+    raw_dir = data_dir / 'raw'
 
     for mouse in mouse_ids:
-        mouse_sessions = list(data_dir.glob(f'*{mouse}*'))
+        mouse_sessions = list(raw_dir.glob(f'*{mouse}*'))
 
         if mouse_sessions:
             meta_file = meta_dir / (mouse + '.json') 
