@@ -37,7 +37,13 @@ if required. The data is processed from ``interim`` and the results saved in
            ├── YYMMDD_mouseID_gN_t0.imec0.lf.meta.tar.gz
            ├── USB_Camera.tdms.tar.gz
            ├── USB_Camerameta.tdms.tar.gz
-           └── YYMMDD_mouseID.tdms.tar.gz
+           ├── YYMMDD_mouseID.tdms.tar.gz
+           └── extra
+               └── ** see below
+
+** Any files collected on the recording day that should be ignored by the
+pipeline should be put inside a subfolder(s) within the session's folder. These
+can take any name.
 
 
 Pipeline
