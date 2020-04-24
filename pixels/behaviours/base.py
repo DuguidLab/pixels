@@ -219,7 +219,7 @@ class Behaviour(ABC):
         Returns
         -------
         action_labels : 1D numpy.ndarray
-            A 1-dimensional array of actions of equal length to the behavioural_data.
+            An array of actions of equal length to the behavioural_data.
 
         """
 
