@@ -70,7 +70,16 @@ def get_data_files(data_dir, session_name):
             recording['behaviour'] = original_name(behaviour[0])
         recording['camera_data'] = original_name(camera_data[num])
         recording['camera_meta'] = original_name(camera_meta[num])
-        recording['action_labels'] = f'action_labels_{num}.npy'
+        recording['action_labels'] = Path(f'action_labels_{num}.npy')
+        recording['behaviour_processed'] = recording['behaviour'].with_name(
+            recording['behaviour'].stem + '_processed.h5'
+        )
+        recording['spike_processed'] = recording['spike_data'].with_name(
+            recording['spike_data'].stem + '_processed.h5'
+        )
+        recording['lfp_processed'] = recording['lfp_data'].with_name(
+            recording['lfp_data'].stem + '_processed.h5'
+        )
         files.append(recording)
 
     return files
@@ -78,12 +87,12 @@ def get_data_files(data_dir, session_name):
 
 def original_name(path):
     """
-    Get the original name of a file uncompressed.
+    Get the original name of a file, uncompressed, as a pathlib.Path.
     """
     name = os.path.basename(path)
     if name.endswith('.tar.gz'):
         name = name[:-7]
-    return name
+    return Path(name)
 
 
 def read_meta(path):
@@ -137,7 +146,7 @@ def read_tdms(path, groups=None):
 
     Parameters
     ----------
-    path : str
+    path : str or pathlib.Path
         Path to the TDMS file to be read.
 
     groups : list of strs (optional)
@@ -158,6 +167,37 @@ def read_tdms(path, groups=None):
                 data.append(group_data)
             df = pd.concat(data, axis=1)
     return df
+
+
+def read_hdf5(path):
+    """
+    Read a dataframe from a h5 file.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the h5 file to read.
+
+    """
+    df = pd.read_hdf(path, 'df')
+    return df
+
+
+def write_hdf5(path, df):
+    """
+    Write a dataframe to an h5 file.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the h5 file to write to.
+
+    df : pd.DataFrame
+        Dataframe to save to h5.
+
+    """
+    df.to_hdf(path, 'df', mode='w')
+    return
 
 
 def get_sessions(mouse_ids, data_dir, meta_dir):
