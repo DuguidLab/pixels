@@ -47,7 +47,7 @@ class Behaviour(ABC):
         self.interim = self.data_dir / 'interim' / self.name
         self.processed = self.data_dir / 'processed' / self.name
         self.interim.mkdir(parents=True, exist_ok=True)
-        self.processed.mkdir(parents=True, exist_ok=True)
+        (self.processed / 'cache').mkdir(parents=True, exist_ok=True)
         self.files = ioutils.get_data_files(self.raw, name)
 
         self.spike_meta = [
@@ -57,7 +57,10 @@ class Behaviour(ABC):
             ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
         ]
 
-        self._action_labels = []
+        self._action_labels = [None] * len(self.files)
+        self._behavioural_data = [None] * len(self.files)
+        self._spike_data = [None] * len(self.files)
+        self._lfp_data = [None] * len(self.files)
         self._lag = [None] * len(self.files)
 
     def find_file(self, name):
@@ -101,7 +104,6 @@ class Behaviour(ABC):
         """
         Process behavioural data from raw tdms and align to neuropixels data.
         """
-        self._action_labels = [None] * len(self.files)
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
 
@@ -124,10 +126,17 @@ class Behaviour(ABC):
             behavioural_data.index = range(len(behavioural_data))
             self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
 
-            output = self.interim / recording['action_labels']
+            output = self.processed / recording['action_labels']
             print(f"> Saving action labels to:")
             print(f"    {output}")
             np.save(output, self._action_labels[rec_num])
+
+            output = self.processed / recording['behaviour_processed']
+            print(f"> Saving downsampled behavioural data to:")
+            print(f"    {output}")
+            del behavioural_data["/'NpxlSync_Signal'/'0'"]
+            ioutils.write_hdf5(output, behavioural_data)
+            self._behavioural_data[rec_num] = behavioural_data
 
         print("> Done!")
 
@@ -146,7 +155,7 @@ class Behaviour(ABC):
             The recording number, i.e. index of self.files to get file paths.
 
         behavioural_data : pandas.DataFrame, optional
-            The behavioural data loaded from the TDMS file.
+            The unprocessed behavioural data loaded from the TDMS file.
 
         sync_channel : np.ndarray, optional
             The sync channel from either the spike or LFP data.
@@ -193,7 +202,7 @@ class Behaviour(ABC):
         sync_channel = signal.binarise(sync_channel).squeeze()
 
         print("    Finding lag")
-        plot_path = self.interim / recording['spike_data']
+        plot_path = self.processed / recording['spike_data']
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
             sync_behav, sync_channel, length=120000, plot=plot_path,
@@ -223,16 +232,55 @@ class Behaviour(ABC):
 
         """
 
-    def get_action_labels(self):
-        if not self._action_labels:
+    def _get_processed_data(self, attr, key):
+        """
+        Used by the following get_X methods to load processed data.
+
+        Parameters
+        ----------
+        attr : str
+            The self attribute that stores the data.
+
+        key : str
+            The key for the files in each recording of self.files that contain this
+            data.
+
+        """
+        saved = getattr(self, attr)
+        if saved[0] is None:
             for rec_num, recording in enumerate(self.files):
-                labels_file = self.interim / recording['action_labels']
-                if labels_file.exists():
-                    self._action_labels[rec_num] = np.load(labels_file)
+                file_path = self.processed / recording[key]
+                if file_path.exists():
+                    saved[rec_num] = ioutils.read_hdf5(file_path)
                 else:
-                    print(f"Action labels for recording no. {rec_num} not yet created.")
-                    self._action_labels[rec_num] = None
-        return self._action_labels
+                    print(f"Could not find {attr[1:]} for recording {rec_num}.")
+                    saved[rec_num] = None
+        return saved
+
+    def get_action_labels(self):
+        """
+        Returns the action labels, either from self._action_labels if they have been
+        loaded already, or from file.
+        """
+        return self._get_processed_data("_action_labels", "action_labels")
+
+    def get_behavioural_data(self):
+        """
+        Returns the downsampled behaviour channels.
+        """
+        return self._get_processed_data("_behavioural_data", "behaviour_processed")
+
+    def get_spike_data(self):
+        """
+        Returns the processed and downsampled spike data.
+        """
+        return self._get_processed_data("_spike_data", "spike_processed")
+
+    def get_lfp_data(self):
+        """
+        Returns the processed and downsampled LFP data.
+        """
+        return self._get_processed_data("_lfp_data", "lfp_processed")
 
     def process_lfp(self):
         """
@@ -257,11 +305,11 @@ class Behaviour(ABC):
             else:
                 lag_start, lag_end = self.sync_data(rec_num, sync_channel=lfp_data[:, -1])
 
-            output = self.interim / recording['lfp_data']
-            output = output.with_name(output.stem + '_processed.npy')
+            output = self.processed / recording['lfp_processed']
             print(f"> Saving data to {output}")
             lfp_data = lfp_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
-            np.save(output, lfp_data)
+            lfp_data = pd.DataFrame(lfp_data[:, :-1])
+            ioutils.write_hdf5(output, lfp_data)
 
     def extract_spikes(self):
         """
@@ -273,3 +321,30 @@ class Behaviour(ABC):
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data.
         """
+
+    def align_trials(self, label, event, data):
+        """
+        Get trials aligned to an event.
+
+        Parameters
+        ----------
+        label : int
+            An action label value to specify which trial types are desired.
+
+        event : int
+            An event type value to specify which event to align the trials to.
+
+        data : str
+            One of 'behaviour', 'spikes' or 'lfp'.
+
+        """
+        action_labels = self.get_action_labels()
+
+        if data == 'behaviour':
+            data = self.get_behavioural_data()
+        elif data == 'spikes':
+            data = self.get_spike_data()
+        elif data == 'lfp':
+            data = self.get_lfp_data()
+        else:
+            raise Exception(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
