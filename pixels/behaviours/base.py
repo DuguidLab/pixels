@@ -50,6 +50,13 @@ class Behaviour(ABC):
         (self.processed / 'cache').mkdir(parents=True, exist_ok=True)
         self.files = ioutils.get_data_files(self.raw, name)
 
+        self._action_labels = None
+        self._behavioural_data = None
+        self._spike_data = None
+        self._lfp_data = None
+        self._lag = None
+        self.drop_data()
+
         self.spike_meta = [
             ioutils.read_meta(self.find_file(f['spike_meta'])) for f in self.files
         ]
@@ -57,6 +64,12 @@ class Behaviour(ABC):
             ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
         ]
 
+        self.trial_duration = 6  # number of seconds in which to extract trials
+
+    def drop_data(self):
+        """
+        Clear attributes that store data to clear some memory.
+        """
         self._action_labels = [None] * len(self.files)
         self._behavioural_data = [None] * len(self.files)
         self._spike_data = [None] * len(self.files)
@@ -251,7 +264,10 @@ class Behaviour(ABC):
             for rec_num, recording in enumerate(self.files):
                 file_path = self.processed / recording[key]
                 if file_path.exists():
-                    saved[rec_num] = ioutils.read_hdf5(file_path)
+                    if file_path.suffix == '.npy':
+                        saved[rec_num] = np.load(file_path)[0]
+                    elif file_path.suffix == '.h5':
+                        saved[rec_num] = ioutils.read_hdf5(file_path)[0]
                 else:
                     print(f"Could not find {attr[1:]} for recording {rec_num}.")
                     saved[rec_num] = None
@@ -324,7 +340,11 @@ class Behaviour(ABC):
 
     def align_trials(self, label, event, data):
         """
-        Get trials aligned to an event.
+        Get trials aligned to an event. This finds all instances of label in the action
+        labels - these are the start times of the trials. Then this finds the first
+        instance of event on or after these start times of each trial. Then this cuts
+        out an 8 second period around each of these events covering all cells,
+        rearranges this data into a MultiIndex DataFrame and returns it.
 
         Parameters
         ----------
@@ -339,6 +359,8 @@ class Behaviour(ABC):
 
         """
         action_labels = self.get_action_labels()
+        actions = action_labels[:, 0]
+        events = action_labels[:, 1]
 
         if data == 'behaviour':
             data = self.get_behavioural_data()
@@ -348,3 +370,17 @@ class Behaviour(ABC):
             data = self.get_lfp_data()
         else:
             raise Exception(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
+
+        trial_starts = np.where((actions == label))[0]
+        trials = []
+        duration = self.sample_rate * self.trial_duration
+        half = duration // 2
+
+        for start in trial_starts:
+            centre = start + np.where(events[start:start + duration] == event)[0][0]
+            trial = data[centre - half + 1:centre + half + 1]
+            trials.append(trial.reset_index(drop=True))
+
+        # TODO: merge trials into a MultiIndex df
+        raise Exception
+

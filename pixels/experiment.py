@@ -54,6 +54,22 @@ class Experiment:
                 )
             )
 
+        self._trial_duration = 6  # number of seconds in which to extract trials
+
+    @property
+    def trial_duration(self):
+        return self._trial_duration
+
+    @trial_duration.setter
+    def trial_duration(self, secs):
+        """
+        By default, when we get data aligned to trials we get the event of interest in
+        the centre of 6 secs. We can change this by setting experiment.trial_duration.
+        """
+        self._trial_duration = secs
+        for session in self.sessions:
+            session.trial_duration = secs
+
     def extract_spikes(self):
         """
         Extract the spikes from raw spike data for all sessions.
@@ -82,3 +98,24 @@ class Experiment:
         """
         for session in self.sessions:
             session.process_motion_tracking()
+
+    def align_trials(self, label, event, data):
+        """
+        Get trials aligned to an event.
+
+        Parameters
+        ----------
+        label : int
+            An action label value to specify which trial types are desired.
+
+        event : int
+            An event type value to specify which event to align the trials to.
+
+        data : str
+            One of 'behaviour', 'spikes' or 'lfp'.
+
+        """
+        df = []
+        for session in self.sessions:
+            df.append(session.align_trials(label, event, data))
+        return df
