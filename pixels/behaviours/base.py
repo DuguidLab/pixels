@@ -8,6 +8,7 @@ import datetime
 import json
 import numpy as np
 import os
+import pandas as pd
 import scipy.signal
 import tarfile
 import time
@@ -147,7 +148,7 @@ class Behaviour(ABC):
             output = self.processed / recording['behaviour_processed']
             print(f"> Saving downsampled behavioural data to:")
             print(f"    {output}")
-            del behavioural_data["/'NpxlSync_Signal'/'0'"]
+            behavioural_data.drop("/'NpxlSync_Signal'/'0'", axis=1, inplace=True)
             ioutils.write_hdf5(output, behavioural_data)
             self._behavioural_data[rec_num] = behavioural_data
 
@@ -220,7 +221,7 @@ class Behaviour(ABC):
         lag_start, match = signal.find_sync_lag(
             sync_behav, sync_channel, length=120000, plot=plot_path,
         )
-        if match < 90:
+        if match < 95:
             print("    The sync channels did not match very well. Check the plot.")
 
         lag_end = len(behavioural_data) - (lag_start + pixels_length)
@@ -265,9 +266,9 @@ class Behaviour(ABC):
                 file_path = self.processed / recording[key]
                 if file_path.exists():
                     if file_path.suffix == '.npy':
-                        saved[rec_num] = np.load(file_path)[0]
+                        saved[rec_num] = np.load(file_path)
                     elif file_path.suffix == '.h5':
-                        saved[rec_num] = ioutils.read_hdf5(file_path)[0]
+                        saved[rec_num] = ioutils.read_hdf5(file_path)
                 else:
                     print(f"Could not find {attr[1:]} for recording {rec_num}.")
                     saved[rec_num] = None
@@ -358,9 +359,8 @@ class Behaviour(ABC):
             One of 'behaviour', 'spikes' or 'lfp'.
 
         """
+        print(f"Aligning {data} data to trials.")
         action_labels = self.get_action_labels()
-        actions = action_labels[:, 0]
-        events = action_labels[:, 1]
 
         if data == 'behaviour':
             data = self.get_behavioural_data()
@@ -371,16 +371,19 @@ class Behaviour(ABC):
         else:
             raise Exception(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
 
-        trial_starts = np.where((actions == label))[0]
         trials = []
-        duration = self.sample_rate * self.trial_duration
-        half = duration // 2
+        for rec_num in range(len(self.files)):
+            actions = action_labels[rec_num][:, 0]
+            events = action_labels[rec_num][:, 1]
+            trial_starts = np.where((actions == label))[0]
+            duration = self.sample_rate * self.trial_duration
+            half = duration // 2
 
-        for start in trial_starts:
-            centre = start + np.where(events[start:start + duration] == event)[0][0]
-            trial = data[centre - half + 1:centre + half + 1]
-            trials.append(trial.reset_index(drop=True))
+            for start in trial_starts:
+                centre = start + np.where(events[start:start + duration] == event)[0][0]
+                trial = data[rec_num][centre - half + 1:centre + half + 1]
+                trials.append(trial.reset_index(drop=True))
 
-        # TODO: merge trials into a MultiIndex df
-        raise Exception
-
+        trials = pd.concat(trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"])
+        trials.sort_index(level=1, axis=1, inplace=True)
+        return trials.reorder_levels(["unit", "trial"], axis=1)
