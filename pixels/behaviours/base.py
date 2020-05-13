@@ -6,14 +6,15 @@ base for defining behaviour-specific processing.
 
 import datetime
 import json
-import numpy as np
 import os
-import pandas as pd
-import scipy.signal
 import tarfile
 import time
 from abc import ABC, abstractmethod
 from shutil import copyfile
+
+import numpy as np
+import pandas as pd
+import scipy.signal
 
 from pixels import ioutils
 from pixels import signal
@@ -107,7 +108,7 @@ class Behaviour(ABC):
             copyfile(raw, interim)
             return interim
 
-        tar = raw.with_name(raw.stem + '.tar.gz')
+        tar = raw.with_name(raw.name + '.tar.gz')
         if tar.exists():
             print(f"    Extracting {tar.name} to interim")
             with tarfile.open(tar) as open_tar:
@@ -198,13 +199,13 @@ class Behaviour(ABC):
         if sync_channel is None:
             print("    Loading neuropixels sync channel")
             sync_channel = ioutils.read_bin(
-                self.find_file(recording['spike_data']),
-                self.spike_meta[rec_num]['nSavedChans'],
+                self.find_file(recording['lfp_data']),
+                self.lfp_meta[rec_num]['nSavedChans'],
                 channel=384,
             )
             pixels_length = sync_channel.size
-            original_samp_rate = int(self.spike_meta[rec_num]['imSampRate'])
-            sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, 30kHz, back/forward
+            original_samp_rate = int(self.lfp_meta[rec_num]['imSampRate'])
+            sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, rec Hz, back/forward
             sync_channel = signal.resample(
                 sync_channel, original_samp_rate, self.sample_rate
             )
@@ -216,7 +217,7 @@ class Behaviour(ABC):
         sync_channel = signal.binarise(sync_channel).squeeze()
 
         print("    Finding lag")
-        plot_path = self.processed / recording['spike_data']
+        plot_path = self.processed / recording['lfp_data']
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
             sync_behav, sync_channel, length=120000, plot=plot_path,
@@ -299,6 +300,38 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
+    def process_spikes(self):
+        """
+        Process the spike data from the raw neural recording data.
+
+        Spike data is processed one channel at a time to not overload memory.
+        """
+        for rec_num, recording in enumerate(self.files):
+            print(f">>>>> Processing spike data for recording {rec_num + 1} of {len(self.files)}")
+
+            orig_rate = self.spike_meta[rec_num]['imSampRate']
+            data_file = self.find_file(recording['spike_data'])
+            num_chans = int(self.spike_meta[rec_num]['nSavedChans'])
+
+            print("> Mapping spike data")
+            data = ioutils.read_bin(data_file, num_chans)
+
+            print(f"> Downsampling to {self.sample_rate} Hz")
+            data = signal.resample(data, orig_rate, self.sample_rate)
+
+            raise Exception
+
+            if self._lag[rec_num] is not None:
+                lag_start, lag_end = self._lag[rec_num]
+            else:
+                lag_start, lag_end = self.sync_data(rec_num, sync_channel=spike_data[:, -1])
+
+            print(f"> Saving data to {output}")
+            output = self.processed / recording['spike_processed']
+            spike_data = spike_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
+            spike_data = pd.DataFrame(spike_data[:, :-1])
+            ioutils.write_hdf5(output, spike_data)
+
     def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data.
@@ -332,6 +365,17 @@ class Behaviour(ABC):
         """
         Extract the spikes from raw spike data.
         """
+
+    def extract_videos(self):
+        """
+        Extract behavioural videos from TDMS to avi.
+        """
+        for rec_num, recording in enumerate(self.files):
+            path = self.find_file(recording['camera_data'])
+            path_avi = path.with_suffix('.avi')
+            if not path_avi.exists():
+                df = ioutils.read_tdms(recording['camera_data'])
+                ioutils.save_df_as_avi(df, path_avi)
 
     def process_motion_tracking(self):
         """

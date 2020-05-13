@@ -9,8 +9,9 @@ import json
 import os
 import numpy as np
 import pandas as pd
-from pathlib import Path
 from nptdms import TdmsFile
+
+from pixels import PixelsError
 
 
 def get_data_files(data_dir, session_name):
@@ -44,7 +45,6 @@ def get_data_files(data_dir, session_name):
     files = []
 
     spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin*')
-    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin*')
     spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta*')
     lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin*')
     lfp_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.meta*')
@@ -57,6 +57,9 @@ def get_data_files(data_dir, session_name):
             camera_meta.append(match)
         else:
             camera_data.append(match)
+
+    if not (spike_data and spike_meta and and lfp_data and lfp_meta):
+        raise PixelsError(f"{session_name}: raw files not correctly named.")
 
     for num, spike_recording in enumerate(spike_data):
         recording = {}
@@ -125,7 +128,7 @@ def read_bin(path, num_chans, channel=None):
     num_chans : int
         The number of channels of data present in the file.
 
-    channel : int, optional
+    channel : int or slice, optional
         The channel to read. If None (default), all channels are read.
 
     """
@@ -233,8 +236,13 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
             session_dates = [
                 datetime.datetime.strptime(s.stem[0:6], '%y%m%d') for s in mouse_sessions
             ]
-            for session in mouse_meta:
-                meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
+
+            for i, session in enumerate(mouse_meta):
+                try:
+                    meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
+                except TypeError:
+                    raise PixelsError(f"{mouse} session #{i}: 'date' not found in JSON.")
+
                 for index, ses_date in enumerate(session_dates):
                     if ses_date == meta_date and not session.get('exclude', False):
                         sessions.append(dict(

@@ -22,7 +22,7 @@ class Experiment:
             List of IDs of the mice to be included in this experiment.
 
         behaviour : class
-            Class definition subclassing from behaviours.Behaviour.
+            Class definition subclassing from pixels.behaviours.Behaviour.
 
         data_dir : str
             Path to the top-level folder containing data for these mice. This folder
@@ -69,6 +69,13 @@ class Experiment:
         self._trial_duration = secs
         for session in self.sessions:
             session.trial_duration = secs
+
+    def process_spikes(self):
+        """
+        Process the spike data from the raw neural recording data for all sessions.
+        """
+        for session in self.sessions:
+            session.process_spikes()
 
     def extract_spikes(self):
         """
