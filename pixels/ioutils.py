@@ -7,6 +7,9 @@ import datetime
 import glob
 import json
 import os
+from pathlib import Path
+
+import ffmpeg
 import numpy as np
 import pandas as pd
 from nptdms import TdmsFile
@@ -107,6 +110,10 @@ def read_meta(path):
     path : pathlib.Path
         Path to the meta file to be read.
 
+    Returns
+    -------
+    dict : A dictionary containing the metadata from the specified file.
+
     """
     metadata = {}
     for entry in path.read_text().split("\n"):
@@ -131,6 +138,11 @@ def read_bin(path, num_chans, channel=None):
     channel : int or slice, optional
         The channel to read. If None (default), all channels are read.
 
+    Returns
+    -------
+    numpy.memmap array : A 2D memory-mapped array containing containing the binary
+        file's data.
+
     """
     if not isinstance(num_chans, int):
         num_chans = int(num_chans)
@@ -140,7 +152,7 @@ def read_bin(path, num_chans, channel=None):
     if channel is not None:
         mapping = mapping[:, channel]
 
-    return pd.DataFrame(data=mapping)
+    return mapping
 
 
 def read_tdms(path, groups=None):
@@ -157,6 +169,10 @@ def read_tdms(path, groups=None):
         all groups are loaded, so specifying the groups you want explicitly can avoid
         loading the entire file from disk.
 
+    Returns
+    -------
+    pandas.DataFrame : A dataframe containing the data from the TDMS file.
+
     """
     with TdmsFile.read(path) as tdms_file:
         if groups is None:
@@ -172,6 +188,41 @@ def read_tdms(path, groups=None):
     return df
 
 
+def save_ndarray_as_avi(video, path, frame_rate):
+    """
+    Save a numpy.ndarray as an .avi video.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Data to save to file as a video. It's dimensions should be (duration, height,
+        width) and data should be of uint8 type.
+
+    path : string / pathlib.Path object
+        File to which the video will be saved.
+
+    frame_rate : int
+        The frame rate of the output video.
+
+    """
+    _, height, width = video.shape
+    process = (
+        ffmpeg
+            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s='{}x{}'.format(width, height))
+            .output(path, pix_fmt='yuv420p', vcodec='libx264', r=frame_rate)
+            .overwrite_output()
+            .run_async(pipe_stdin=True)
+    )
+    for frame in video:
+        process.stdin.write(
+            frame
+                .astype(np.uint8)
+                .tobytes()
+        )
+    process.stdin.close()
+    process.wait()
+
+
 def read_hdf5(path):
     """
     Read a dataframe from a h5 file.
@@ -180,6 +231,10 @@ def read_hdf5(path):
     ----------
     path : str or pathlib.Path
         Path to the h5 file to read.
+
+    Returns
+    -------
+    pandas.DataFrame : The dataframe stored within the hdf5 file under the name 'df'.
 
     """
     df = pd.read_hdf(path, 'df')
@@ -219,6 +274,11 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
 
     meta_dir : str
         The path to the folder containing training metadata JSON files.
+
+    Returns
+    -------
+    list of dicts : Dictionaries containing the values that can be used to create new
+        Behaviour subclass instances.
 
     """
     if not isinstance(mouse_ids, (list, tuple, set)):
