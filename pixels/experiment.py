@@ -98,6 +98,13 @@ class Experiment:
         for session in self.sessions:
             session.process_behaviour()
 
+    def extract_videos(self):
+        """
+        Extract videos from TDMS in the raw folder to avi files in the interim folder.
+        """
+        for session in self.sessions:
+            session.extract_videos()
+
     def process_motion_tracking(self):
         """
         Process motion tracking data either from raw camera data, or from
