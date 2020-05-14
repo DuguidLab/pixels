@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from nptdms import TdmsFile
 
-from pixels import PixelsError
+from pixels.error import PixelsError
 
 
 def get_data_files(data_dir, session_name):
@@ -58,7 +58,7 @@ def get_data_files(data_dir, session_name):
         else:
             camera_data.append(match)
 
-    if not (spike_data and spike_meta and and lfp_data and lfp_meta):
+    if not (spike_data and spike_meta and lfp_data and lfp_meta):
         raise PixelsError(f"{session_name}: raw files not correctly named.")
 
     for num, spike_recording in enumerate(spike_data):

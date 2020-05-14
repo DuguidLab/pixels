@@ -8,10 +8,3 @@ import os
 import json
 
 from pixels.experiment import Experiment
-
-
-class PixelsError(Exception):
-    """
-    Error type used for user errors.
-    """
-    pass
