@@ -129,7 +129,13 @@ class Experiment:
             One of 'behaviour', 'spikes' or 'lfp'.
 
         """
-        df = []
+        trials = []
         for session in self.sessions:
-            df.append(session.align_trials(label, event, data))
+            trials.append(session.align_trials(label, event, data))
+
+        df = pd.concat(
+            trials, axis=1, copy=False,
+            keys=range(len(trials)),
+            names=["trial", "unit", "session"]
+        )
         return df
