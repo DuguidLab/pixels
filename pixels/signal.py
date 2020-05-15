@@ -3,12 +3,13 @@ This module provides functions that operate on signal data.
 """
 
 
-import scipy.signal
 import time
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from pathlib import Path
+import scipy
 
 
 def resample(array, from_hz, to_hz, padtype=None):
@@ -30,6 +31,10 @@ def resample(array, from_hz, to_hz, padtype=None):
         How to deal with end effects. Default: 'minimum', where the resampling filter
         pretends the ends are extended using the array's minimum.
 
+    Returns
+    -------
+    np.ndarray : Array of the same width of the input array, but altered height.
+
     """
     from_hz = float(from_hz)
     to_hz = float(to_hz)
@@ -37,7 +42,7 @@ def resample(array, from_hz, to_hz, padtype=None):
     if from_hz == to_hz:
         return array
 
-    elif from_hz > to_hz:
+    if from_hz > to_hz:
         up = 1
         factor = from_hz / to_hz
         down = factor
@@ -53,7 +58,25 @@ def resample(array, from_hz, to_hz, padtype=None):
             up += factor
             down += 1
 
-    return scipy.signal.resample_poly(array, up, down, padtype=padtype or 'minimum')
+    new_data = []
+    cols = array.shape[1]
+    # resample_poly preallocates an entire new array of float64 values, so to prevent
+    # MemoryErrors we will run it with 5GB chunks
+    size_bytes = array[0].dtype.itemsize * array.size
+    chunks = int(np.ceil(size_bytes / 5368709120))
+    chunk_size = int(np.ceil(cols / chunks))
+
+    if chunks > 1:
+        print(f"    0%", end="\r")
+    current = 0
+    for i in range(chunks):
+        block_data = array[:, current : min(current + chunk_size, cols)]
+        result = scipy.signal.resample_poly(block_data, up, down, padtype=padtype or 'minimum')
+        new_data.append(result)
+        current += chunk_size
+        print(f"    {100 * current / cols:.1f}%", end="\r")
+
+    return np.concatenate(new_data, axis=1)
 
 
 def binarise(data):
@@ -106,12 +129,23 @@ def find_sync_lag(array1, array2, length=None, plot=False):
         False (default), or a path specifying where to save a png of the best match.  If
         it already exists, it will be suffixed with the time.
 
+    Returns
+    -------
+    int : The lag between the starts of the two arrays. A positive number indicates that
+        the first array begins earlier than the second.
+
+    float : The percentage of values that were identical between the two arrays when
+        aligned with the calculated lag, for the length compared.
+
     """
     if length is None:
         length = len(array1) // 2
 
-    if len(array1) // 2 < length or len(array2) // 2 < length:
+    if len(array1) < length * 2 or len(array2) < length * 2:
         raise Exception(f'Arrays must be at least twice the size of length parameter.')
+
+    array1 = array1.squeeze()
+    array2 = array2.squeeze()
 
     sync_p = []
     for i in range(length):
@@ -147,6 +181,6 @@ def find_sync_lag(array1, array2, length=None, plot=False):
             axes[0].plot(array1[:plot_length])
             axes[1].plot(array2[-lag:-lag + plot_length])
         fig.savefig(plot)
-        print(f"    Sync plot saved to:\n  {plot}")
+        print(f"    Sync plot saved to:\n    {plot}")
 
     return lag, match
