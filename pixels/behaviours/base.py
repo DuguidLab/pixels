@@ -138,7 +138,10 @@ class Behaviour(ABC):
             if self._lag[rec_num] is not None:
                 lag_start, lag_end = self._lag[rec_num]
             else:
-                lag_start, lag_end = self.sync_data(rec_num, behavioural_data=behavioural_data)
+                lag_start, lag_end = self.sync_data(
+                    rec_num,
+                    behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values
+                )
 
             print(f"> Extracting action labels")
             behavioural_data = behavioural_data[max(lag_start, 0):-1-max(lag_end, 0)]
