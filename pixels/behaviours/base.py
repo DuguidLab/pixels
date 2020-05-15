@@ -18,6 +18,10 @@ import scipy.signal
 
 from pixels import ioutils
 from pixels import signal
+from pixels.error import PixelsError
+
+
+BEHAVIOUR_HZ = 25000
 
 
 class Behaviour(ABC):
@@ -190,11 +194,12 @@ class Behaviour(ABC):
 
         if behavioural_data is None:
             print("    Loading behavioural data")
-            behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
-            behav_array = signal.resample(behavioural_data, 25000, self.sample_rate)
-            behavioural_data.iloc[:len(behav_array), :] = behav_array
-            behavioural_data = behavioural_data[:len(behav_array)]
-            del behav_array
+            behavioural_data = ioutils.read_tdms(
+                self.find_file(recording['behaviour']), groups=["NpxlSync_Signal"]
+            )
+            behavioural_data = signal.resample(
+                behavioural_data.values, BEHAVIOUR_HZ, self.sample_rate
+            )
 
         if sync_channel is None:
             print("    Loading neuropixels sync channel")
@@ -203,29 +208,25 @@ class Behaviour(ABC):
                 self.lfp_meta[rec_num]['nSavedChans'],
                 channel=384,
             )
-            pixels_length = sync_channel.size
             original_samp_rate = int(self.lfp_meta[rec_num]['imSampRate'])
             sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, rec Hz, back/forward
             sync_channel = signal.resample(
                 sync_channel, original_samp_rate, self.sample_rate
             )
-            pixels_length //= 30
-        else:
-            pixels_length = len(sync_channel)
 
-        sync_behav = signal.binarise(behavioural_data["/'NpxlSync_Signal'/'0'"])
+        behavioural_data = signal.binarise(behavioural_data)
         sync_channel = signal.binarise(sync_channel).squeeze()
 
         print("    Finding lag")
         plot_path = self.processed / recording['lfp_data']
         plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
-            sync_behav, sync_channel, length=120000, plot=plot_path,
+            behavioural_data, sync_channel, length=120000, plot=plot_path,
         )
         if match < 95:
             print("    The sync channels did not match very well. Check the plot.")
 
-        lag_end = len(behavioural_data) - (lag_start + pixels_length)
+        lag_end = len(behavioural_data) - (lag_start + len(sync_channel))
         self._lag[rec_num] = (lag_start, lag_end)
         return lag_start, lag_end
 
@@ -319,18 +320,17 @@ class Behaviour(ABC):
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
 
-            raise Exception
-
             if self._lag[rec_num] is not None:
                 lag_start, lag_end = self._lag[rec_num]
             else:
-                lag_start, lag_end = self.sync_data(rec_num, sync_channel=spike_data[:, -1])
+                lag_start, lag_end = self.sync_data(rec_num, sync_channel=data[:, -1])
 
             print(f"> Saving data to {output}")
             output = self.processed / recording['spike_processed']
-            spike_data = spike_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
-            spike_data = pd.DataFrame(spike_data[:, :-1])
-            ioutils.write_hdf5(output, spike_data)
+            raise Exception
+            data = data[max(-lag_start, 0):-max(-lag_end, 0)]
+            data = pd.DataFrame(data[:, :-1])
+            ioutils.write_hdf5(output, data)
 
     def process_lfp(self):
         """
@@ -413,7 +413,10 @@ class Behaviour(ABC):
         elif data == 'lfp':
             data = self.get_lfp_data()
         else:
-            raise Exception(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
+            raise PixelsError(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
+
+        if not data or data[0] is None:
+            raise PixelsError(f"Data does not appear to have been processed yet.")
 
         trials = []
         for rec_num in range(len(self.files)):
@@ -430,4 +433,5 @@ class Behaviour(ABC):
 
         trials = pd.concat(trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"])
         trials.sort_index(level=1, axis=1, inplace=True)
-        return trials.reorder_levels(["unit", "trial"], axis=1)
+        trials = trials.reorder_levels(["unit", "trial"], axis=1)
+        return trials
