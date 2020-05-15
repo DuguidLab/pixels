@@ -130,7 +130,7 @@ class Behaviour(ABC):
             behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
 
             print(f"> Downsampling to {self.sample_rate} Hz")
-            behav_array = signal.resample(behavioural_data, 25000, self.sample_rate)
+            behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
             behavioural_data.iloc[:len(behav_array), :] = behav_array
             behavioural_data = behavioural_data[:len(behav_array)]
             del behav_array
@@ -197,28 +197,23 @@ class Behaviour(ABC):
 
         if behavioural_data is None:
             print("    Loading behavioural data")
-            behavioural_data = ioutils.read_tdms(
-                self.find_file(recording['behaviour']), groups=["NpxlSync_Signal"]
-            )
+            data_file = self.find_file(recording['behaviour'])
+            behavioural_data = ioutils.read_tdms(data_file, groups=["NpxlSync_Signal"])
             behavioural_data = signal.resample(
                 behavioural_data.values, BEHAVIOUR_HZ, self.sample_rate
             )
 
         if sync_channel is None:
             print("    Loading neuropixels sync channel")
-            sync_channel = ioutils.read_bin(
-                self.find_file(recording['lfp_data']),
-                self.lfp_meta[rec_num]['nSavedChans'],
-                channel=384,
-            )
-            original_samp_rate = int(self.lfp_meta[rec_num]['imSampRate'])
+            data_file = self.find_file(recording['lfp_data'])
+            num_chans = self.lfp_meta[rec_num]['nSavedChans']
+            sync_channel = ioutils.read_bin(data_file, num_chans, channel=384)
+            orig_rate = int(self.lfp_meta[rec_num]['imSampRate'])
             sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, rec Hz, back/forward
-            sync_channel = signal.resample(
-                sync_channel, original_samp_rate, self.sample_rate
-            )
+            sync_channel = signal.resample(sync_channel, orig_rate, self.sample_rate)
 
         behavioural_data = signal.binarise(behavioural_data)
-        sync_channel = signal.binarise(sync_channel).squeeze()
+        sync_channel = signal.binarise(sync_channel)
 
         print("    Finding lag")
         plot_path = self.processed / recording['lfp_data']
@@ -307,15 +302,13 @@ class Behaviour(ABC):
     def process_spikes(self):
         """
         Process the spike data from the raw neural recording data.
-
-        Spike data is processed one channel at a time to not overload memory.
         """
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Processing spike data for recording {rec_num + 1} of {len(self.files)}")
 
-            orig_rate = self.spike_meta[rec_num]['imSampRate']
             data_file = self.find_file(recording['spike_data'])
-            num_chans = int(self.spike_meta[rec_num]['nSavedChans'])
+            orig_rate = self.spike_meta[rec_num]['imSampRate']
+            num_chans = self.spike_meta[rec_num]['nSavedChans']
 
             print("> Mapping spike data")
             data = ioutils.read_bin(data_file, num_chans)
@@ -328,10 +321,12 @@ class Behaviour(ABC):
             else:
                 lag_start, lag_end = self.sync_data(rec_num, sync_channel=data[:, -1])
 
-            print(f"> Saving data to {output}")
             output = self.processed / recording['spike_processed']
-            raise Exception
-            data = data[max(-lag_start, 0):-max(-lag_end, 0)]
+            print(f"> Saving data to {output}")
+            if lag_end < 0:
+                data = data[:-lag_end]
+            if lag_start < 0:
+                data = data[lag_start:]
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 
@@ -342,27 +337,29 @@ class Behaviour(ABC):
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Processing LFP for recording {rec_num + 1} of {len(self.files)}")
 
+            data_file = self.find_file(recording['lfp_data'])
+            orig_rate = self.lfp_meta[rec_num]['imSampRate']
+            num_chans = self.lfp_meta[rec_num]['nSavedChans']
+
             print("> Mapping LFP data")
-            lfp_data = ioutils.read_bin(
-                self.find_file(recording['lfp_data']),
-                self.lfp_meta[rec_num]['nSavedChans'],
-            )
+            data = ioutils.read_bin(data_file, num_chans)
 
             print(f"> Downsampling to {self.sample_rate} Hz")
-            lfp_data = signal.resample(
-                lfp_data, self.lfp_meta[rec_num]['imSampRate'], self.sample_rate
-            )
+            data = signal.resample(data, orig_rate, self.sample_rate)
 
             if self._lag[rec_num] is not None:
                 lag_start, lag_end = self._lag[rec_num]
             else:
-                lag_start, lag_end = self.sync_data(rec_num, sync_channel=lfp_data[:, -1])
+                lag_start, lag_end = self.sync_data(rec_num, sync_channel=data[:, -1])
 
             output = self.processed / recording['lfp_processed']
             print(f"> Saving data to {output}")
-            lfp_data = lfp_data[max(-lag_start, 0):-1-max(-lag_end, 0)]
-            lfp_data = pd.DataFrame(lfp_data[:, :-1])
-            ioutils.write_hdf5(output, lfp_data)
+            if lag_end < 0:
+                data = data[:-lag_end]
+            if lag_start < 0:
+                data = data[lag_start:]
+            data = pd.DataFrame(data[:, :-1])
+            ioutils.write_hdf5(output, data)
 
     def extract_spikes(self):
         """
