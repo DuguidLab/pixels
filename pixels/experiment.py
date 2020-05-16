@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from pixels import ioutils
+from pixels.error import PixelsError
 
 
 class Experiment:
