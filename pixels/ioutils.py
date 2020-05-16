@@ -206,19 +206,22 @@ def save_ndarray_as_avi(video, path, frame_rate):
 
     """
     _, height, width = video.shape
+
     process = (
         ffmpeg
-            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s='{}x{}'.format(width, height))
-            .output(path, pix_fmt='yuv420p', vcodec='libx264', r=frame_rate)
+            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
+            .output(path.as_posix(), pix_fmt='yuv420p', vcodec='libx264', r=frame_rate)
             .overwrite_output()
             .run_async(pipe_stdin=True)
     )
+
     for frame in video:
         process.stdin.write(
-            frame
+            np.stack([frame, frame, frame], axis=2)
                 .astype(np.uint8)
                 .tobytes()
         )
+
     process.stdin.close()
     process.wait()
 
