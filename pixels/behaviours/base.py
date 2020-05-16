@@ -416,11 +416,12 @@ class Behaviour(ABC):
 
         """
         print(f"Aligning {data} data to trials.")
+        data = data.lower()
         action_labels = self.get_action_labels()
 
         if data == 'behaviour':
             data = self.get_behavioural_data()
-        elif data == 'spikes':
+        elif data == 'spikes' or data == 'ap':
             data = self.get_spike_data()
         elif data == 'lfp':
             data = self.get_lfp_data()
