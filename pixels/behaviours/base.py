@@ -324,7 +324,7 @@ class Behaviour(ABC):
             output = self.processed / recording['spike_processed']
             print(f"> Saving data to {output}")
             if lag_end < 0:
-                data = data[:-lag_end]
+                data = data[:lag_end]
             if lag_start < 0:
                 data = data[lag_start:]
             data = pd.DataFrame(data[:, :-1])
@@ -374,8 +374,20 @@ class Behaviour(ABC):
             path = self.find_file(recording['camera_data'])
             path_avi = path.with_suffix('.avi')
             if not path_avi.exists():
-                df = ioutils.read_tdms(recording['camera_data'])
-                ioutils.save_df_as_avi(df, path_avi)
+                df = ioutils.read_tdms(path)
+                meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
+                actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
+                ind_skipped = meta["/'frames'/'ind_skipped'"].dropna()
+
+                height = actual_heights.max()
+                remainder = ind_skipped.size - actual_heights[actual_heights != height].size
+                duration = actual_heights.size - remainder
+                width = df.size / (duration * height)
+                if width != 640:
+                    raise PixelsError("Width calculation must be incorrect, discuss.")
+
+                video = df.values.reshape((duration, height, int(width)))
+                ioutils.save_ndarray_as_avi(video, path_avi, 50)
 
     def process_motion_tracking(self):
         """
