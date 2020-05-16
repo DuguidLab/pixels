@@ -7,6 +7,8 @@ data and run subsequent analyses.
 import os
 from pathlib import Path
 
+import pandas as pd
+
 from pixels import ioutils
 
 
@@ -37,8 +39,13 @@ class Experiment:
 
         self.behaviour = behaviour
         self.mouse_ids = mouse_ids
+
         self.data_dir = Path(data_dir).expanduser()
         self.meta_dir = Path(meta_dir).expanduser()
+        if not self.data_dir.exists():
+            raise PixelsError(f"Directory not found: {data_dir}")
+        if not self.meta_dir.exists():
+            raise PixelsError(f"Directory not found: {meta_dir}")
 
         self.raw = self.data_dir / 'raw'
         self.processed = self.data_dir / 'processed'
@@ -136,6 +143,6 @@ class Experiment:
         df = pd.concat(
             trials, axis=1, copy=False,
             keys=range(len(trials)),
-            names=["trial", "unit", "session"]
+            names=["session", "unit", "trial"]
         )
         return df
