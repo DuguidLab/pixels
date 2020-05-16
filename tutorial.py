@@ -20,10 +20,10 @@ from pixels.behaviours.leverpush import LeverPush, ActionLabels, Events
 # and 'processed' folders) and training metadata.
 #
 myexp = Experiment(
-    'MCos1497',
+    'MCos1497',  # This can be a list
     LeverPush,
-    '~/ardbeg/motor_choice/Npx_data',
-    '~/ardbeg/CuedBehaviourAnalysis/Data/TrainingJSON',
+    '~/path/to/data',
+    '~/path/to/metadata',
 )
 
 
@@ -34,8 +34,9 @@ myexp = Experiment(
 #
 #    - action labels (.npy)
 #    - behavioural data (.h5)
+#    - LFP data (.h5)
 #    - spike data (.h5)
-#    - lfp data (.h5)
+#    - sorted spikes (TODO)
 #
 
 # This aligns, crops and downsamples behavioural data.
@@ -47,34 +48,61 @@ myexp.process_lfp()
 # This aligns, crops, and downsamples spike data.
 myexp.process_spikes()
 
-# This performs spike sorting, and ...
-myexp.extract_spikes()
+# This performs spike sorting, and ... (TODO)
+myexp.spike_sort()
 
-# This...
+# This... (TODO)
 myexp.process_motion_tracking()
 
 
-# Step 3: Run analyses
+# Step 3: Run exploratory analyses
 #
 # Once all the data has been processed and converted into forms that are compatible with
 # the rest of the data, we are ready to extract data organised by trials.
 #
+# Data can be loading as trial-aligned data using the Experiment.align_trials method.
+# This returns a multidimensional pandas DataFrame containing the desired data organised
+# by session, unit, and trial.
+#
+# Here are some examples of how data can be plotted:
+#
 
-# behaviour
-hit_trials = myexp.align_trials(ActionLabels.rewarded_push, Events.back_sensor_open, 'behaviour')[0]
+# Plotting all behavioural data channels for session 1, trial 3
+hits = myexp.align_trials(
+    ActionLabels.rewarded_push,  # This selects which trials we want
+    Events.back_sensor_open,  # This selects what event we want them aligned to 
+    'behaviour'  # And this selects what kind of data we want
+)
 
-plt.clf()
+plt.figure()
 fig, axes = plt.subplots(6, 1, sharex=True)
-tmp=hit_trials.columns.get_level_values('unit').unique()
+channels = hit_trials.columns.get_level_values('unit').unique()
+trial = 3
+session = 1
 for i in range(6):
-    sns.lineplot(data=hit_trials[tmp[i]][1], estimator=None, style=None, ax=axes[i])
+    sns.lineplot(
+        data=hits[session][channels[i]][trial],
+        estimator=None, style=None,
+        ax=axes[i]
+    )
 plt.show()
 
-# lfp
-hit_trials_lfp = myexp.align_trials(ActionLabels.rewarded_push, Events.back_sensor_open, 'lfp')[0]
+# Plotting spike data from session 1, trial 8, units 101 to 110
+hits = myexp.align_trials(
+    ActionLabels.rewarded_push,
+    Events.back_sensor_open,
+    'spikes'
+)
 
-plt.clf()
+plt.figure()
 fig, axes = plt.subplots(10, 1, sharex=True)
+trial = 8
+session = 1
 for i in range(10):
-    sns.lineplot(data=hit_trials_lfp[100 + i][8], estimator=None, style=None, ax=axes[i])
+    sns.lineplot(
+        data=hits[101 + i][trial],
+        estimator=None,
+        style=None,
+        ax=axes[i]
+    )
 plt.show()
