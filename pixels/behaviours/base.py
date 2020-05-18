@@ -209,7 +209,7 @@ class Behaviour(ABC):
             num_chans = self.lfp_meta[rec_num]['nSavedChans']
             sync_channel = ioutils.read_bin(data_file, num_chans, channel=384)
             orig_rate = int(self.lfp_meta[rec_num]['imSampRate'])
-            sync_channel = sync_channel[:120 * original_samp_rate * 2]  # 2 mins, rec Hz, back/forward
+            sync_channel = sync_channel[:120 * orig_rate * 2]  # 2 mins, rec Hz, back/forward
             sync_channel = signal.resample(sync_channel, orig_rate, self.sample_rate)
 
         behavioural_data = signal.binarise(behavioural_data)
