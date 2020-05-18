@@ -326,7 +326,7 @@ class Behaviour(ABC):
             if lag_end < 0:
                 data = data[:lag_end]
             if lag_start < 0:
-                data = data[lag_start:]
+                data = data[- lag_start:]
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 
@@ -355,9 +355,9 @@ class Behaviour(ABC):
             output = self.processed / recording['lfp_processed']
             print(f"> Saving data to {output}")
             if lag_end < 0:
-                data = data[:-lag_end]
+                data = data[:lag_end]
             if lag_start < 0:
-                data = data[lag_start:]
+                data = data[- lag_start:]
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 

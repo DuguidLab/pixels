@@ -165,7 +165,7 @@ def find_sync_lag(array1, array2, length=None, plot=False):
         lag = lag_p
         match = match_p
     else:
-        lag = lag_n
+        lag = - lag_n
         match = match_n
 
     if plot:
