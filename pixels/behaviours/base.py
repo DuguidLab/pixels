@@ -14,7 +14,6 @@ from shutil import copyfile
 
 import numpy as np
 import pandas as pd
-import scipy.signal
 
 from pixels import ioutils
 from pixels import signal
@@ -80,7 +79,21 @@ class Behaviour(ABC):
         self._behavioural_data = [None] * len(self.files)
         self._spike_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
-        self._lag = [None] * len(self.files)
+        self._load_lag()
+
+    def _load_lag(self):
+        """
+        Load previously-calculated lag information from a saved file if it exists,
+        otherwise return Nones.
+        """
+        lag_file = self.processed / 'lag.json'
+        if lag_file.exists():
+            with lag_file.open() as fd:
+                lag = json.load(fd)
+            for rec_lag in lag:
+                self._lag[rec_num] = (rec_lag['lag_start'], rec_lag['lag_end'])
+        else:
+            self._lag = [None] * len(self.files)
 
     def find_file(self, name):
         """
@@ -119,53 +132,10 @@ class Behaviour(ABC):
                 open_tar.extractall(path=self.interim)
             return interim
 
-    def process_behaviour(self):
-        """
-        Process behavioural data from raw tdms and align to neuropixels data.
-        """
-        for rec_num, recording in enumerate(self.files):
-            print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
-
-            print(f"> Loading behavioural data")
-            behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
-
-            print(f"> Downsampling to {self.sample_rate} Hz")
-            behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
-            behavioural_data.iloc[:len(behav_array), :] = behav_array
-            behavioural_data = behavioural_data[:len(behav_array)]
-            del behav_array
-
-            if self._lag[rec_num] is not None:
-                lag_start, lag_end = self._lag[rec_num]
-            else:
-                lag_start, lag_end = self.sync_data(
-                    rec_num,
-                    behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values
-                )
-
-            print(f"> Extracting action labels")
-            behavioural_data = behavioural_data[max(lag_start, 0):-1-max(lag_end, 0)]
-            behavioural_data.index = range(len(behavioural_data))
-            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
-
-            output = self.processed / recording['action_labels']
-            print(f"> Saving action labels to:")
-            print(f"    {output}")
-            np.save(output, self._action_labels[rec_num])
-
-            output = self.processed / recording['behaviour_processed']
-            print(f"> Saving downsampled behavioural data to:")
-            print(f"    {output}")
-            behavioural_data.drop("/'NpxlSync_Signal'/'0'", axis=1, inplace=True)
-            ioutils.write_hdf5(output, behavioural_data)
-            self._behavioural_data[rec_num] = behavioural_data
-
-        print("> Done!")
-
     def sync_data(self, rec_num, behavioural_data=None, sync_channel=None):
         """
-        This method will calculate and return the lag between the behavioural data and
-        the neuropixels data for each recording.
+        This method will calculate the lag between the behavioural data and the
+        neuropixels data for each recording and save it to file and self._lag.
 
         behavioural_data and sync_channel will be loaded from file and downsampled if
         not provided, otherwise if provided they must already be the same sample
@@ -181,15 +151,6 @@ class Behaviour(ABC):
 
         sync_channel : np.ndarray, optional
             The sync channel from either the spike or LFP data.
-
-        Returns
-        -------
-        lag_start : int
-            The number of sample points that the behavioural data has extra at the
-            start of the recording.
-
-        lag_end : int
-            The same as above but at the end.
 
         """
         print("> Finding lag between sync channels")
@@ -226,7 +187,14 @@ class Behaviour(ABC):
 
         lag_end = len(behavioural_data) - (lag_start + len(sync_channel))
         self._lag[rec_num] = (lag_start, lag_end)
-        return lag_start, lag_end
+
+        lag_json = []
+        for lag_start, lag_end in self._lag:
+            lag_json.append(dict(lag_start=lag_start, lag_end=lag_end))
+        with (self.processed / 'lag.json').open() as fd:
+            json.dump(lag_json, fd)
+
+        return
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
@@ -299,6 +267,48 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
+    def process_behaviour(self):
+        """
+        Process behavioural data from raw tdms and align to neuropixels data.
+        """
+        for rec_num, recording in enumerate(self.files):
+            print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
+
+            print(f"> Loading behavioural data")
+            behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
+
+            print(f"> Downsampling to {self.sample_rate} Hz")
+            behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
+            behavioural_data.iloc[:len(behav_array), :] = behav_array
+            behavioural_data = behavioural_data[:len(behav_array)]
+            del behav_array
+
+            if self._lag[rec_num] is None:
+                self.sync_data(
+                    rec_num,
+                    behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values
+                )
+            lag_start, lag_end = self._lag[rec_num]
+
+            print(f"> Extracting action labels")
+            behavioural_data = behavioural_data[max(lag_start, 0):-1-max(lag_end, 0)]
+            behavioural_data.index = range(len(behavioural_data))
+            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
+
+            output = self.processed / recording['action_labels']
+            print(f"> Saving action labels to:")
+            print(f"    {output}")
+            np.save(output, self._action_labels[rec_num])
+
+            output = self.processed / recording['behaviour_processed']
+            print(f"> Saving downsampled behavioural data to:")
+            print(f"    {output}")
+            behavioural_data.drop("/'NpxlSync_Signal'/'0'", axis=1, inplace=True)
+            ioutils.write_hdf5(output, behavioural_data)
+            self._behavioural_data[rec_num] = behavioural_data
+
+        print("> Done!")
+
     def process_spikes(self):
         """
         Process the spike data from the raw neural recording data.
@@ -316,10 +326,9 @@ class Behaviour(ABC):
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
 
-            if self._lag[rec_num] is not None:
-                lag_start, lag_end = self._lag[rec_num]
-            else:
-                lag_start, lag_end = self.sync_data(rec_num, sync_channel=data[:, -1])
+            if self._lag[rec_num] is None:
+                self.sync_data(rec_num, sync_channel=data[:, -1])
+            lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['spike_processed']
             print(f"> Saving data to {output}")
@@ -347,10 +356,9 @@ class Behaviour(ABC):
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
 
-            if self._lag[rec_num] is not None:
-                lag_start, lag_end = self._lag[rec_num]
-            else:
-                lag_start, lag_end = self.sync_data(rec_num, sync_channel=data[:, -1])
+            if self._lag[rec_num] is None:
+                self.sync_data(rec_num, sync_channel=data[:, -1])
+            lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['lfp_processed']
             print(f"> Saving data to {output}")
