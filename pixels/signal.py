@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import scipy
+import scipy.signal
 
 
 def resample(array, from_hz, to_hz, padtype=None):
