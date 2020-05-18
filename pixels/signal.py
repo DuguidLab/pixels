@@ -59,7 +59,10 @@ def resample(array, from_hz, to_hz, padtype=None):
             down += 1
 
     new_data = []
-    cols = array.shape[1]
+    if array.ndim == 1:
+        cols = 1
+    else:
+        cols = array.shape[1]
     # resample_poly preallocates an entire new array of float64 values, so to prevent
     # MemoryErrors we will run it with 5GB chunks
     size_bytes = array[0].dtype.itemsize * array.size
