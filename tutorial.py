@@ -78,11 +78,13 @@ plt.figure()
 fig, axes = plt.subplots(6, 1, sharex=True)
 channels = hit_trials.columns.get_level_values('unit').unique()
 trial = 3
-session = 1
+session = 0
 for i in range(6):
+    chan_name = channels[i]
     sns.lineplot(
-        data=hits[session][channels[i]][trial],
-        estimator=None, style=None,
+        data=hits[session][chan_name][trial],
+        estimator=None,
+        style=None,
         ax=axes[i]
     )
 plt.show()
@@ -97,7 +99,7 @@ hits = myexp.align_trials(
 plt.figure()
 fig, axes = plt.subplots(10, 1, sharex=True)
 trial = 8
-session = 1
+session = 0
 for i in range(10):
     sns.lineplot(
         data=hits[101 + i][trial],
