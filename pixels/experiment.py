@@ -78,6 +78,24 @@ class Experiment:
         for session in self.sessions:
             session.trial_duration = secs
 
+    def __getitem__(self, index):
+        """
+        Allow indexing directly of sessions with myexp[X].
+        """
+        return self.sessions[index]
+
+    def __len__(self):
+        """
+        Length of experiment is the number of sessions.
+        """
+        return len(self.sessions)
+
+    def __repr__(self):
+        rep = "Experiment with sessions:"
+        for session in self.sessions:
+            rep += "\n\t" + session.name
+        return rep
+
     def process_spikes(self):
         """
         Process the spike data from the raw neural recording data for all sessions.
