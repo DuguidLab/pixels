@@ -58,8 +58,16 @@ myexp.process_motion_tracking()
 # Step 3: Run exploratory analyses
 #
 # Once all the data has been processed and converted into forms that are compatible with
-# the rest of the data, we are ready to extract data organised by trials.
-#
+# the rest of the data, we are ready to explore the data.
+
+# We can access individual sessions by indexing into the Experiment:
+myexp[0]
+
+# And from a session we can get continuous processed data:
+spike_data = myexp[0].get_spike_data()
+lfp_data = myexp[0].get_lfp_data()
+behavioural_data = myexp[0].get_behavioural_data()
+
 # Data can be loading as trial-aligned data using the Experiment.align_trials method.
 # This returns a multidimensional pandas DataFrame containing the desired data organised
 # by session, unit, and trial.
