@@ -87,13 +87,12 @@ class Behaviour(ABC):
         otherwise return Nones.
         """
         lag_file = self.processed / 'lag.json'
+        self._lag = [None] * len(self.files)
         if lag_file.exists():
             with lag_file.open() as fd:
                 lag = json.load(fd)
-            for rec_lag in lag:
+            for rec_num, rec_lag in enumerate(lag):
                 self._lag[rec_num] = (rec_lag['lag_start'], rec_lag['lag_end'])
-        else:
-            self._lag = [None] * len(self.files)
 
     def find_file(self, name):
         """
@@ -132,7 +131,7 @@ class Behaviour(ABC):
                 open_tar.extractall(path=self.interim)
             return interim
 
-    def sync_data(self, rec_num, behavioural_data=None, sync_channel=None):
+    def sync_data(self, rec_num, behavioural_data=None, sync_channel=None, plot=None):
         """
         This method will calculate the lag between the behavioural data and the
         neuropixels data for each recording and save it to file and self._lag.
@@ -177,10 +176,10 @@ class Behaviour(ABC):
         sync_channel = signal.binarise(sync_channel)
 
         print("    Finding lag")
-        plot_path = self.processed / recording['lfp_data']
-        plot_path = plot_path.with_name(plot_path.stem + '_sync.png')
+        if plot:
+            plot = plot_path.with_name(plot_path.stem + '_sync.png')
         lag_start, match = signal.find_sync_lag(
-            behavioural_data, sync_channel, length=120000, plot=plot_path,
+            behavioural_data, sync_channel, length=120000, plot=plot,
         )
         if match < 95:
             print("    The sync channels did not match very well. Check the plot.")
@@ -191,7 +190,7 @@ class Behaviour(ABC):
         lag_json = []
         for lag_start, lag_end in self._lag:
             lag_json.append(dict(lag_start=lag_start, lag_end=lag_end))
-        with (self.processed / 'lag.json').open() as fd:
+        with (self.processed / 'lag.json').open('w') as fd:
             json.dump(lag_json, fd)
 
         return
@@ -286,7 +285,8 @@ class Behaviour(ABC):
             if self._lag[rec_num] is None:
                 self.sync_data(
                     rec_num,
-                    behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values
+                    behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values,
+                    plot=self.processed / reording['behaviour']
                 )
             lag_start, lag_end = self._lag[rec_num]
 
@@ -327,7 +327,8 @@ class Behaviour(ABC):
             data = signal.resample(data, orig_rate, self.sample_rate)
 
             if self._lag[rec_num] is None:
-                self.sync_data(rec_num, sync_channel=data[:, -1])
+                plot = self.processed / recording['spike_data']
+                self.sync_data(rec_num, sync_channel=data[:, -1], plot=plot)
             lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['spike_processed']
@@ -357,7 +358,8 @@ class Behaviour(ABC):
             data = signal.resample(data, orig_rate, self.sample_rate)
 
             if self._lag[rec_num] is None:
-                self.sync_data(rec_num, sync_channel=data[:, -1])
+                plot = self.processed / recording['lfp_data']
+                self.sync_data(rec_num, sync_channel=data[:, -1], plot=plot)
             lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['lfp_processed']
