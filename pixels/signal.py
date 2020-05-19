@@ -3,6 +3,7 @@ This module provides functions that operate on signal data.
 """
 
 
+import multiprocessing as mp
 import time
 from pathlib import Path
 
@@ -72,14 +73,27 @@ def resample(array, from_hz, to_hz, padtype=None):
     if chunks > 1:
         print(f"    0%", end="\r")
     current = 0
-    for i in range(chunks):
-        block_data = array[:, current : min(current + chunk_size, cols)]
-        result = scipy.signal.resample_poly(block_data, up, down, padtype=padtype or 'minimum')
-        new_data.append(result)
-        current += chunk_size
-        print(f"    {100 * current / cols:.1f}%", end="\r")
+    with mp.Pool(20) as pool:
+        for i in range(chunks):
+            chunk_data = array[:, current : min(current + chunk_size, cols)]
+            result = pool.starmap(
+                scipy.signal.resample_poly,
+                _pool_map_resample(chunk_data.T, up, down, padtype=padtype or 'minimum')
+            )
+            new_data.extend(result)
+            current += chunk_size
+            print(f"    {100 * current / cols:.1f}%", end="\r")
 
-    return np.concatenate(new_data, axis=1)
+    return np.stack(new_data, axis=1).astype(np.int16)
+
+
+def _pool_map_resample(iter_data, up, down, padtype):
+    """
+    This creates a generator that provides the arguments to pool.starmap above when
+    resampling.
+    """
+    for i in iter_data:
+        yield (i, up, down, 0, ('kaiser', 5.0), padtype)
 
 
 def binarise(data):
