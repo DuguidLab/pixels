@@ -131,7 +131,7 @@ class Behaviour(ABC):
                 open_tar.extractall(path=self.interim)
             return interim
 
-    def sync_data(self, rec_num, behavioural_data=None, sync_channel=None, plot=None):
+    def sync_data(self, rec_num, behavioural_data=None, sync_channel=None):
         """
         This method will calculate the lag between the behavioural data and the
         neuropixels data for each recording and save it to file and self._lag.
@@ -176,8 +176,7 @@ class Behaviour(ABC):
         sync_channel = signal.binarise(sync_channel)
 
         print("    Finding lag")
-        if plot:
-            plot = plot_path.with_name(plot_path.stem + '_sync.png')
+        plot = self.processed / f'sync_{rec_num}.png'
         lag_start, match = signal.find_sync_lag(
             behavioural_data, sync_channel, length=120000, plot=plot,
         )
@@ -286,7 +285,6 @@ class Behaviour(ABC):
                 self.sync_data(
                     rec_num,
                     behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values,
-                    plot=self.processed / reording['behaviour']
                 )
             lag_start, lag_end = self._lag[rec_num]
 
@@ -327,8 +325,7 @@ class Behaviour(ABC):
             data = signal.resample(data, orig_rate, self.sample_rate)
 
             if self._lag[rec_num] is None:
-                plot = self.processed / recording['spike_data']
-                self.sync_data(rec_num, sync_channel=data[:, -1], plot=plot)
+                self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['spike_processed']
@@ -358,8 +355,7 @@ class Behaviour(ABC):
             data = signal.resample(data, orig_rate, self.sample_rate)
 
             if self._lag[rec_num] is None:
-                plot = self.processed / recording['lfp_data']
-                self.sync_data(rec_num, sync_channel=data[:, -1], plot=plot)
+                self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
             output = self.processed / recording['lfp_processed']
