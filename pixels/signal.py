@@ -62,6 +62,7 @@ def resample(array, from_hz, to_hz, padtype=None):
     new_data = []
     if array.ndim == 1:
         cols = 1
+        array = array.reshape((-1, cols))
     else:
         cols = array.shape[1]
     # resample_poly preallocates an entire new array of float64 values, so to prevent
@@ -73,7 +74,7 @@ def resample(array, from_hz, to_hz, padtype=None):
     if chunks > 1:
         print(f"    0%", end="\r")
     current = 0
-    with mp.Pool(20) as pool:
+    with mp.Pool(mp.cpu_count() // 2) as pool:
         for i in range(chunks):
             chunk_data = array[:, current : min(current + chunk_size, cols)]
             result = pool.starmap(
