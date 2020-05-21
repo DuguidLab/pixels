@@ -401,7 +401,42 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
-    def align_trials(self, label, event, data):
+    def _get_neuro_raw(self, kind):
+        raw = []
+        meta = getattr(self, f"{kind}_meta")
+        for rec_num, recording in enumerate(self.files):
+            data_file = self.find_file(recording[f'{kind}_data'])
+            orig_rate = int(meta[rec_num]['imSampRate'])
+            num_chans = int(meta[rec_num]['nSavedChans'])
+            factor = int(orig_rate / self.sample_rate)
+
+            data = ioutils.read_bin(data_file, num_chans)
+
+            if self._lag[rec_num] is None:
+                self.sync_data(rec_num, sync_channel=data[:, -1])
+            lag_start, lag_end = self._lag[rec_num]
+
+            if lag_end < 0:
+                data = data[:lag_end * factor]
+            if lag_start < 0:
+                data = data[- lag_start * factor:]
+            raw.append(pd.DataFrame(data[:, :-1]))
+
+        return raw, orig_rate
+
+    def get_spike_data_raw(self):
+        """
+        Returns the raw spike data with lag region removed.
+        """
+        return self._get_neuro_raw('spike')
+
+    def get_lfp_data_raw(self):
+        """
+        Returns the raw spike data with lag region removed.
+        """
+        return self._get_neuro_raw('lfp')
+
+    def align_trials(self, label, event, data, raw=False):
         """
         Get trials aligned to an event. This finds all instances of label in the action
         labels - these are the start times of the trials. Then this finds the first
@@ -418,35 +453,42 @@ class Behaviour(ABC):
             An event type value to specify which event to align the trials to.
 
         data : str
-            One of 'behaviour', 'spikes' or 'lfp'.
+            One of 'behaviour', 'spike' or 'lfp'.
 
         """
         print(f"Aligning {data} data to trials.")
         data = data.lower()
         action_labels = self.get_action_labels()
 
+        if data not in ['behaviour', 'spike', 'lfp']:
+            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spikes' or 'lfp'")
         if data == 'behaviour':
-            data = self.get_behavioural_data()
-        elif data == 'spikes' or data == 'ap':
-            data = self.get_spike_data()
-        elif data == 'lfp':
-            data = self.get_lfp_data()
+            data = 'behavioural'
+        getter = f"get_{data}_data"
+        if raw:
+            data, sample_rate = getattr(self, f"{getter}_raw")()
         else:
-            raise PixelsError(f"data parameter should be 'behaviour', 'spikes' or 'lfp'")
+            data = getattr(self, getter)()
+            sample_rate = self.sample_rate
 
         if not data or data[0] is None:
-            raise PixelsError(f"Data does not appear to have been processed yet.")
+            raise PixelsError(f"align_trials: Could not get {data} data.")
 
         trials = []
+        # The logic here is that the action labels will always have a sample rate of
+        # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
+        # the action labels, and 'half' is used to index data.
+        duration = self.sample_rate * self.trial_duration
+        half = (sample_rate * self.trial_duration) // 2
+
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
-            duration = self.sample_rate * self.trial_duration
-            half = duration // 2
 
             for start in trial_starts:
                 centre = start + np.where(events[start:start + duration] == event)[0][0]
+                centre *= int(sample_rate / self.sample_rate)
                 trial = data[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
 

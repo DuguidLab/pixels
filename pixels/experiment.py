@@ -139,7 +139,7 @@ class Experiment:
         for session in self.sessions:
             session.process_motion_tracking()
 
-    def align_trials(self, label, event, data):
+    def align_trials(self, label, event, data, raw=False):
         """
         Get trials aligned to an event.
 
@@ -157,7 +157,7 @@ class Experiment:
         """
         trials = []
         for session in self.sessions:
-            trials.append(session.align_trials(label, event, data))
+            trials.append(session.align_trials(label, event, data, raw))
 
         df = pd.concat(
             trials, axis=1, copy=False,
