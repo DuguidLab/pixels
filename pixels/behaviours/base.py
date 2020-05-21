@@ -194,77 +194,6 @@ class Behaviour(ABC):
 
         return
 
-    @abstractmethod
-    def _extract_action_labels(self, behavioural_data):
-        """
-        This method must be overriden with the derivation of action labels from
-        behavioural data specific to the behavioural task.
-
-        Parameters
-        ----------
-        behavioural_data : pandas.DataFrame
-            A dataframe containing the behavioural DAQ data.
-
-        Returns
-        -------
-        action_labels : 1D numpy.ndarray
-            An array of actions of equal length to the behavioural_data.
-
-        """
-
-    def _get_processed_data(self, attr, key):
-        """
-        Used by the following get_X methods to load processed data.
-
-        Parameters
-        ----------
-        attr : str
-            The self attribute that stores the data.
-
-        key : str
-            The key for the files in each recording of self.files that contain this
-            data.
-
-        """
-        saved = getattr(self, attr)
-        if saved[0] is None:
-            for rec_num, recording in enumerate(self.files):
-                file_path = self.processed / recording[key]
-                if file_path.exists():
-                    if file_path.suffix == '.npy':
-                        saved[rec_num] = np.load(file_path)
-                    elif file_path.suffix == '.h5':
-                        saved[rec_num] = ioutils.read_hdf5(file_path)
-                else:
-                    print(f"Could not find {attr[1:]} for recording {rec_num}.")
-                    saved[rec_num] = None
-        return saved
-
-    def get_action_labels(self):
-        """
-        Returns the action labels, either from self._action_labels if they have been
-        loaded already, or from file.
-        """
-        return self._get_processed_data("_action_labels", "action_labels")
-
-    def get_behavioural_data(self):
-        """
-        Returns the downsampled behaviour channels.
-        """
-        return self._get_processed_data("_behavioural_data", "behaviour_processed")
-
-    def get_spike_data(self):
-        """
-        Returns the processed and downsampled spike data.
-        """
-        return self._get_processed_data("_spike_data", "spike_processed")
-
-    def get_lfp_data(self):
-        """
-        Returns the processed and downsampled LFP data.
-        """
-        return self._get_processed_data("_lfp_data", "lfp_processed")
-
     def process_behaviour(self):
         """
         Process behavioural data from raw tdms and align to neuropixels data.
@@ -400,6 +329,77 @@ class Behaviour(ABC):
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data.
         """
+
+    @abstractmethod
+    def _extract_action_labels(self, behavioural_data):
+        """
+        This method must be overriden with the derivation of action labels from
+        behavioural data specific to the behavioural task.
+
+        Parameters
+        ----------
+        behavioural_data : pandas.DataFrame
+            A dataframe containing the behavioural DAQ data.
+
+        Returns
+        -------
+        action_labels : 1D numpy.ndarray
+            An array of actions of equal length to the behavioural_data.
+
+        """
+
+    def _get_processed_data(self, attr, key):
+        """
+        Used by the following get_X methods to load processed data.
+
+        Parameters
+        ----------
+        attr : str
+            The self attribute that stores the data.
+
+        key : str
+            The key for the files in each recording of self.files that contain this
+            data.
+
+        """
+        saved = getattr(self, attr)
+        if saved[0] is None:
+            for rec_num, recording in enumerate(self.files):
+                file_path = self.processed / recording[key]
+                if file_path.exists():
+                    if file_path.suffix == '.npy':
+                        saved[rec_num] = np.load(file_path)
+                    elif file_path.suffix == '.h5':
+                        saved[rec_num] = ioutils.read_hdf5(file_path)
+                else:
+                    print(f"Could not find {attr[1:]} for recording {rec_num}.")
+                    saved[rec_num] = None
+        return saved
+
+    def get_action_labels(self):
+        """
+        Returns the action labels, either from self._action_labels if they have been
+        loaded already, or from file.
+        """
+        return self._get_processed_data("_action_labels", "action_labels")
+
+    def get_behavioural_data(self):
+        """
+        Returns the downsampled behaviour channels.
+        """
+        return self._get_processed_data("_behavioural_data", "behaviour_processed")
+
+    def get_spike_data(self):
+        """
+        Returns the processed and downsampled spike data.
+        """
+        return self._get_processed_data("_spike_data", "spike_processed")
+
+    def get_lfp_data(self):
+        """
+        Returns the processed and downsampled LFP data.
+        """
+        return self._get_processed_data("_lfp_data", "lfp_processed")
 
     def align_trials(self, label, event, data):
         """
