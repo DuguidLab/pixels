@@ -69,8 +69,6 @@ class Behaviour(ABC):
             ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
         ]
 
-        self.trial_duration = 6  # number of seconds in which to extract trials
-
     def drop_data(self):
         """
         Clear attributes that store data to clear some memory.
@@ -436,13 +434,13 @@ class Behaviour(ABC):
         """
         return self._get_neuro_raw('lfp')
 
-    def align_trials(self, label, event, data, raw=False):
+    def align_trials(self, label, event, data, raw=False, duration=1000):
         """
         Get trials aligned to an event. This finds all instances of label in the action
         labels - these are the start times of the trials. Then this finds the first
-        instance of event on or after these start times of each trial. Then this cuts
-        out an 8 second period around each of these events covering all cells,
-        rearranges this data into a MultiIndex DataFrame and returns it.
+        instance of event on or after these start times of each trial. Then it cuts out
+        a period around each of these events covering all units, rearranges this data
+        into a MultiIndex DataFrame and returns it.
 
         Parameters
         ----------
@@ -455,13 +453,20 @@ class Behaviour(ABC):
         data : str
             One of 'behaviour', 'spike' or 'lfp'.
 
+        raw : bool, optional
+            Whether to get raw, unprocessed data instead of processed and downsampled
+            data. Defaults to False.
+
+        duration : int/float, optional
+            The length of time desired in the output.
+
         """
         print(f"Aligning {data} data to trials.")
         data = data.lower()
         action_labels = self.get_action_labels()
 
         if data not in ['behaviour', 'spike', 'lfp']:
-            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spikes' or 'lfp'")
+            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
         if data == 'behaviour':
             data = 'behavioural'
         getter = f"get_{data}_data"
@@ -477,9 +482,10 @@ class Behaviour(ABC):
         trials = []
         # The logic here is that the action labels will always have a sample rate of
         # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
-        # the action labels, and 'half' is used to index data.
-        duration = self.sample_rate * self.trial_duration
-        half = (sample_rate * self.trial_duration) // 2
+        # the action labels, so always give it 5 seconds to scan, then 'half' is used to
+        # index data.
+        duration = self.sample_rate * 5
+        half = (sample_rate * duration) // 2
 
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]

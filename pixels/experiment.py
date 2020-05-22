@@ -62,22 +62,6 @@ class Experiment:
                 )
             )
 
-        self._trial_duration = 6  # number of seconds in which to extract trials
-
-    @property
-    def trial_duration(self):
-        return self._trial_duration
-
-    @trial_duration.setter
-    def trial_duration(self, secs):
-        """
-        By default, when we get data aligned to trials we get the event of interest in
-        the centre of 6 secs. We can change this by setting experiment.trial_duration.
-        """
-        self._trial_duration = secs
-        for session in self.sessions:
-            session.trial_duration = secs
-
     def __getitem__(self, index):
         """
         Allow indexing directly of sessions with myexp[X].
