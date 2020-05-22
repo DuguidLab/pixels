@@ -434,7 +434,7 @@ class Behaviour(ABC):
         """
         return self._get_neuro_raw('lfp')
 
-    def align_trials(self, label, event, data, raw=False, duration=1000):
+    def align_trials(self, label, event, data, raw=False, duration=1):
         """
         Get trials aligned to an event. This finds all instances of label in the action
         labels - these are the start times of the trials. Then this finds the first

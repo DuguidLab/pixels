@@ -123,25 +123,14 @@ class Experiment:
         for session in self.sessions:
             session.process_motion_tracking()
 
-    def align_trials(self, label, event, data, raw=False):
+    def align_trials(self, label, event, data, raw=False, duration=1):
         """
-        Get trials aligned to an event.
-
-        Parameters
-        ----------
-        label : int
-            An action label value to specify which trial types are desired.
-
-        event : int
-            An event type value to specify which event to align the trials to.
-
-        data : str
-            One of 'behaviour', 'spikes' or 'lfp'.
-
+        Get trials aligned to an event. Check behaviours.base.Behaviour.align_trials for
+        usage information.
         """
         trials = []
         for session in self.sessions:
-            trials.append(session.align_trials(label, event, data, raw))
+            trials.append(session.align_trials(label, event, data, raw, duration))
 
         df = pd.concat(
             trials, axis=1, copy=False,
