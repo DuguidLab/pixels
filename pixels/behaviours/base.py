@@ -406,7 +406,7 @@ class Behaviour(ABC):
             data_file = self.find_file(recording[f'{kind}_data'])
             orig_rate = int(meta[rec_num]['imSampRate'])
             num_chans = int(meta[rec_num]['nSavedChans'])
-            factor = int(orig_rate / self.sample_rate)
+            factor = orig_rate / self.sample_rate
 
             data = ioutils.read_bin(data_file, num_chans)
 
@@ -414,10 +414,12 @@ class Behaviour(ABC):
                 self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
+            lag_start = int(lag_start * factor)
+            lag_end = int(lag_end * factor)
             if lag_end < 0:
-                data = data[:lag_end * factor]
+                data = data[:lag_end]
             if lag_start < 0:
-                data = data[- lag_start * factor:]
+                data = data[- lag_start:]
             raw.append(pd.DataFrame(data[:, :-1]))
 
         return raw, orig_rate
@@ -484,7 +486,7 @@ class Behaviour(ABC):
         # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
         # the action labels, so always give it 5 seconds to scan, then 'half' is used to
         # index data.
-        duration = self.sample_rate * 5
+        scan_duration = self.sample_rate * 5
         half = (sample_rate * duration) // 2
 
         for rec_num in range(len(self.files)):
@@ -493,7 +495,7 @@ class Behaviour(ABC):
             trial_starts = np.where((actions == label))[0]
 
             for start in trial_starts:
-                centre = start + np.where(events[start:start + duration] == event)[0][0]
+                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
                 centre *= int(sample_rate / self.sample_rate)
                 trial = data[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
