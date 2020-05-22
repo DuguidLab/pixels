@@ -503,4 +503,10 @@ class Behaviour(ABC):
         trials = pd.concat(trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"])
         trials.sort_index(level=1, axis=1, inplace=True)
         trials = trials.reorder_levels(["unit", "trial"], axis=1)
+        points = trials.shape[0]
+        start = (- duration / 2) + (duration / points)
+        end = duration / 2
+        timepoints = np.linspace(start, duration / 2, points)
+        trials['time'] = pd.Series(timepoints, index=trials.index)
+        trials = trials.set_index('time')
         return trials
