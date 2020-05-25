@@ -12,6 +12,7 @@ from pathlib import Path
 import ffmpeg
 import numpy as np
 import pandas as pd
+from tempfile import gettempdir
 from nptdms import TdmsFile
 
 from pixels.error import PixelsError
@@ -174,7 +175,7 @@ def read_tdms(path, groups=None):
     pandas.DataFrame : A dataframe containing the data from the TDMS file.
 
     """
-    with TdmsFile.read(path) as tdms_file:
+    with TdmsFile.read(path, memmap_dir=gettempdir()) as tdms_file:
         if groups is None:
             df = tdms_file.as_dataframe()
         else:
