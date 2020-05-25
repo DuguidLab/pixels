@@ -195,9 +195,9 @@ def save_ndarray_as_avi(video, path, frame_rate):
 
     Parameters
     ----------
-    array : numpy.ndarray
-        Data to save to file as a video. It's dimensions should be (duration, height,
-        width) and data should be of uint8 type.
+    video : numpy.ndarray
+        Video data to save to file. It's dimensions should be (duration, height, width)
+        and data should be of uint8 type.
 
     path : string / pathlib.Path object
         File to which the video will be saved.
