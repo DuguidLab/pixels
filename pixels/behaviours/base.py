@@ -496,17 +496,18 @@ class Behaviour(ABC):
 
             for start in trial_starts:
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
-                centre *= int(sample_rate / self.sample_rate)
+                centre = int(centre * sample_rate / self.sample_rate)
                 trial = data[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
 
         trials = pd.concat(trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"])
-        trials.sort_index(level=1, axis=1, inplace=True)
+        trials = trials.sort_index(level=1, axis=1)
         trials = trials.reorder_levels(["unit", "trial"], axis=1)
+
         points = trials.shape[0]
         start = (- duration / 2) + (duration / points)
-        end = duration / 2
         timepoints = np.linspace(start, duration / 2, points)
         trials['time'] = pd.Series(timepoints, index=trials.index)
         trials = trials.set_index('time')
+
         return trials
