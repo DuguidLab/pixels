@@ -463,14 +463,14 @@ class Behaviour(ABC):
             The length of time desired in the output.
 
         """
-        print(f"Aligning {data} data to trials.")
+        print(f"Aligning {'raw ' if raw else ''}{data} data to trials.")
         data = data.lower()
         action_labels = self.get_action_labels()
 
-        if data not in ['behaviour', 'spike', 'lfp']:
-            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
-        if data == 'behaviour':
+        if data in 'behavioural':
             data = 'behavioural'
+        if data not in ['behavioural', 'spike', 'lfp']:
+            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
         getter = f"get_{data}_data"
         if raw:
             data, sample_rate = getattr(self, f"{getter}_raw")()

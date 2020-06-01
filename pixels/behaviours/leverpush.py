@@ -117,35 +117,20 @@ class LeverPush(Behaviour):
     
         return action_labels
 
-    def remove_incomplete_pushes(self):
-        """
-        Remove uncued pushes that do not break the front sensor.
-        """
-        pass
-
-    def remove_rowing_pushes(self):
-        """
-        Remove rewarded pushes that break the front sensor more than once.
-        """
-        pass
-
     def extract_ITIs(self, label, data, raw=False):
         """
-        Get inter-trial intervals. This finds all inter-trial intervals,
-        bound by the previous reset offset for trials following an
-        uncued push or missed cue, or  the previous reward offset for
-        trials following a rewarded push, and terminating at the subsequent
-        cue onset for missed cue and rewarded push, or subsequent back
-        sensor break for uncued push. Then it cuts out the intervals defined
-        by these end points, rearranges this data, pads with NaNs due to variable
-        ITI length, puts it into a MultiIndex DataFrame and returns it.
+        Get inter-trial intervals. This finds all inter-trial intervals, bound by the
+        previous reset offset for trials following an uncued push or missed cue, or the
+        previous reward offset for trials following a rewarded push, and terminating at
+        the subsequent cue onset for missed cue and rewarded push, or subsequent back
+        sensor break for uncued push. Then it cuts out the intervals defined by these
+        end points, rearranges this data, pads with NaNs due to variable ITI length,
+        puts it into a MultiIndex DataFrame and returns it.
+
         Parameters
         ----------
         label : int
             An action label value to specify which trial types are desired.
-
-        event : int
-            An event type value to specify which event to align the trials to.
 
         data : str
             One of 'behaviour', 'spike' or 'lfp'.
@@ -155,14 +140,14 @@ class LeverPush(Behaviour):
             data. Defaults to False.
 
         """
-        print(f"Extracting ITIs from raw={raw} {data} data.")
+        print(f"Extracting ITIs from {'raw ' if raw else ''}{data} data.")
         data = data.lower()
         action_labels = self.get_action_labels()
 
-        if data not in ['behaviour', 'spike', 'lfp']:
-            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
-        if data == 'behaviour':
+        if data in 'behavioural':
             data = 'behavioural'
+        if data not in ['behavioural', 'spike', 'lfp']:
+            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
         getter = f"get_{data}_data"
         if raw:
             data, sample_rate = getattr(self, f"{getter}_raw")()
@@ -171,11 +156,11 @@ class LeverPush(Behaviour):
             sample_rate = self.sample_rate
 
         if not data or data[0] is None:
-            raise PixelsError(f"align_trials: Could not get {data} data.")
+            raise PixelsError(f"LeverPush.extract_ITIs: Could not get {data} data.")
 
         itis = []
-        # The logic here is to find the lsat non-zero event prior to the end
-        # of the ITI, itself defined as the specific action label for that trial
+        # The logic here is to find the last non-zero event prior to the end of the ITI,
+        # itself defined as the specific action label for that trial
 
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
@@ -185,10 +170,9 @@ class LeverPush(Behaviour):
             for end in iti_ends:
                 try:
                     start = np.where(events[:end] != 0)[0][-1]
-                    start = int(start * sample_rate / self.sample_rate)
                 except IndexError:
                     start = end - 10001
-                    start = int(start * sample_rate / self.sample_rate)
+                start = int(start * sample_rate / self.sample_rate)
                 iti = data[rec_num][start + 1:end]
                 itis.append(iti.reset_index(drop=True))
 
@@ -197,7 +181,6 @@ class LeverPush(Behaviour):
         itis = itis.reorder_levels(["unit", "trial"], axis=1)
 
         return itis
-
 
 
 class LeverPushExp(Experiment):
