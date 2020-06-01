@@ -5,7 +5,9 @@ This module provides lever-push specific operations.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
+from pixels import Experiment
 from pixels import signal
 from pixels.behaviours import Behaviour
 
@@ -126,3 +128,89 @@ class LeverPush(Behaviour):
         Remove rewarded pushes that break the front sensor more than once.
         """
         pass
+
+    def extract_ITIs(self, label, data, raw=False):
+        """
+        Get inter-trial intervals. This finds all inter-trial intervals,
+        bound by the previous reset offset for trials following an
+        uncued push or missed cue, or  the previous reward offset for
+        trials following a rewarded push, and terminating at the subsequent
+        cue onset for missed cue and rewarded push, or subsequent back
+        sensor break for uncued push. Then it cuts out the intervals defined
+        by these end points, rearranges this data, pads with NaNs due to variable
+        ITI length, puts it into a MultiIndex DataFrame and returns it.
+        Parameters
+        ----------
+        label : int
+            An action label value to specify which trial types are desired.
+
+        event : int
+            An event type value to specify which event to align the trials to.
+
+        data : str
+            One of 'behaviour', 'spike' or 'lfp'.
+
+        raw : bool, optional
+            Whether to get raw, unprocessed data instead of processed and downsampled
+            data. Defaults to False.
+
+        """
+        print(f"Extracting ITIs from raw={raw} {data} data.")
+        data = data.lower()
+        action_labels = self.get_action_labels()
+
+        if data not in ['behaviour', 'spike', 'lfp']:
+            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
+        if data == 'behaviour':
+            data = 'behavioural'
+        getter = f"get_{data}_data"
+        if raw:
+            data, sample_rate = getattr(self, f"{getter}_raw")()
+        else:
+            data = getattr(self, getter)()
+            sample_rate = self.sample_rate
+
+        if not data or data[0] is None:
+            raise PixelsError(f"align_trials: Could not get {data} data.")
+
+        itis = []
+        # The logic here is to find the lsat non-zero event prior to the end
+        # of the ITI, itself defined as the specific action label for that trial
+
+        for rec_num in range(len(self.files)):
+            actions = action_labels[rec_num][:, 0]
+            events = action_labels[rec_num][:, 1]
+            iti_ends = np.where((actions == label))[0]
+
+            for end in iti_ends:
+                try:
+                    start = np.where(events[:end] != 0)[0][-1]
+                    start = int(start * sample_rate / self.sample_rate)
+                except IndexError:
+                    start = end - 10001
+                    start = int(start * sample_rate / self.sample_rate)
+                iti = data[rec_num][start + 1:end]
+                itis.append(iti.reset_index(drop=True))
+
+        itis = pd.concat(itis, axis=1, copy=False, keys=range(len(itis)), names=["trial", "unit"])
+        itis = itis.sort_index(level=1, axis=1)
+        itis = itis.reorder_levels(["unit", "trial"], axis=1)
+
+        return itis
+
+
+
+class LeverPushExp(Experiment):
+    def extract_ITIs(self, label, data, raw=False):
+        """
+        Get inter-trial intervals preceding an action.
+        """
+        itis = []
+        for session in self.sessions:
+            itis.append(session.extract_ITIs(label, data, raw))
+        df = pd.concat(
+            itis, axis=1, copy=False,
+            keys=range(len(itis)),
+            names=["session", "unit", "trial"]
+        )
+        return df
