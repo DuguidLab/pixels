@@ -10,6 +10,7 @@ import os
 import tarfile
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from shutil import copyfile
 
 import numpy as np
@@ -328,9 +329,25 @@ class Behaviour(ABC):
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """
-        Process motion tracking data either from raw camera data, or from
-        previously-generated deeplabcut coordinate data.
+        Run DeepLabCut motion tracking on behavioural videos.
         """
+        import deeplabcut  # bloated so imported when needed
+
+        self.extract_videos()
+
+        config = Path(config).expanduser()
+        if not config.exists():
+            raise PixelsError(f"Config at {config} not found.")
+
+        for rec_num, recording in enumerate(self.files):
+            video = self.find_file(recording['camera_data']).with_suffix('.avi')
+            if not video.exists():
+                raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
+
+            deeplabcut.analyze_videos(config, [video])
+            deeplabcut.plot_trajectories(config, [video])
+            if create_labelled_video:
+                deeplabcut.create_labeled_video(config, [video])
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):

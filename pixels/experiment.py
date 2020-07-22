@@ -115,13 +115,13 @@ class Experiment:
         for session in self.sessions:
             session.extract_videos()
 
-    def process_motion_tracking(self):
+    def process_motion_tracking(self, config, create_labelled_video=False):
         """
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data, for all sessions.
         """
         for session in self.sessions:
-            session.process_motion_tracking()
+            session.process_motion_tracking(config, create_labelled_video=False)
 
     def align_trials(self, label, event, data, raw=False, duration=1):
         """

@@ -51,8 +51,14 @@ myexp.process_spikes()
 # This performs spike sorting, and ... (TODO)
 myexp.spike_sort()
 
-# This... (TODO)
-myexp.process_motion_tracking()
+# This extracts posture coordinates from TDMS videos using DeepLabCut
+config = '/path/to/this/behaviours/deeplabcut/config.yaml'
+myexp.process_motion_tracking(config)
+# If you also want to output labelled videos, pass this keyword arg:
+myexp.process_motion_tracking(config, create_labelled_video=True):
+# This method will convert the videos from TDMS to AVI before running them through DLC.
+# If you just want the AVI videos without the DLC, you can do so directly:
+myexp.extract_videos()
 
 
 # Step 3: Run exploratory analyses
