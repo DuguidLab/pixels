@@ -306,23 +306,27 @@ class Behaviour(ABC):
         for rec_num, recording in enumerate(self.files):
             path = self.find_file(recording['camera_data'])
             path_avi = path.with_suffix('.avi')
-            if not path_avi.exists():
-                df = ioutils.read_tdms(path)
-                meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
-                actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
-                ind_skipped = meta["/'frames'/'ind_skipped'"].dropna()
+            if path_avi.exists():
+                continue
 
-                height = actual_heights.max()
-                remainder = ind_skipped.size - actual_heights[actual_heights != height].size
-                duration = actual_heights.size - remainder
-                width = df.size / (duration * height)
-                if width != 640:
-                    raise PixelsError("Width calculation must be incorrect, discuss.")
+            df = ioutils.read_tdms(path)
+            meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
+            actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
+            ind_skipped = meta["/'frames'/'ind_skipped'"].dropna()
 
-                video = df.values.reshape((duration, height, int(width)))
-                ioutils.save_ndarray_as_avi(video, path_avi, 50)
+            height = actual_heights.max()
+            remainder = ind_skipped.size - actual_heights[actual_heights != height].size
+            duration = actual_heights.size - remainder
+            width = df.size / (duration * height)
+            if width != 640:
+                raise PixelsError("Width calculation must be incorrect, discuss.")
 
-    def process_motion_tracking(self):
+            video = df.values.reshape((duration, height, int(width)))
+            ioutils.save_ndarray_as_avi(video, path_avi, 50)
+            if path_avi.exists():
+                path.unlink(missing_ok=True)
+
+    def process_motion_tracking(self, config, create_labelled_video=False):
         """
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data.
