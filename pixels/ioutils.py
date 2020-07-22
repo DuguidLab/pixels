@@ -207,6 +207,7 @@ def save_ndarray_as_avi(video, path, frame_rate):
 
     """
     _, height, width = video.shape
+    path = Path(path)
 
     process = (
         ffmpeg
@@ -225,6 +226,8 @@ def save_ndarray_as_avi(video, path, frame_rate):
 
     process.stdin.close()
     process.wait()
+    if not path.exists():
+        raise PixelsError(f"AVI creation failed: {path}")
 
 
 def read_hdf5(path):
