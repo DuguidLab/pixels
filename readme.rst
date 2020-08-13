@@ -82,6 +82,22 @@ the processed folder. The sync step will also save a figure to ``sync_0.png``,
 which should be checked to visually confirm that the syncing went well.
 
 
+Conda
+-----
+
+These commands can be used to create a conda environment with all libraries
+used by the pipeline:
+
+.. code-block:: python
+
+    conda env create -n pixels numpy pandas nptdms scipy matplotlib -c conda-forge
+    conda activate pixels
+    pip install ffmpeg-python
+
+This does not include deeplabcut and it's dependencies - see the deeplabcut
+docs for how to install.
+
+
 Resources
 ---------
 
