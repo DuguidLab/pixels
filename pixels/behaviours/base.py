@@ -53,7 +53,6 @@ class Behaviour(ABC):
         self.interim = self.data_dir / 'interim' / self.name
         self.processed = self.data_dir / 'processed' / self.name
         self.interim.mkdir(parents=True, exist_ok=True)
-        (self.processed / 'cache').mkdir(parents=True, exist_ok=True)
         self.files = ioutils.get_data_files(self.raw, name)
 
         self._action_labels = None
