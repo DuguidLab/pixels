@@ -176,7 +176,7 @@ class Behaviour(ABC):
         print("    Finding lag")
         plot = self.processed / f'sync_{rec_num}.png'
         lag_start, match = signal.find_sync_lag(
-            behavioural_data, sync_channel, length=120000, plot=plot,
+            behavioural_data, sync_channel, plot=plot,
         )
         if match < 95:
             print("    The sync channels did not match very well. Check the plot.")

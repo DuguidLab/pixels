@@ -123,10 +123,10 @@ def _binarise_real(data):
     return (data > 0.5).astype(np.int8)
 
 
-def find_sync_lag(array1, array2, length=None, plot=False):
+def find_sync_lag(array1, array2, plot=False):
     """
     Find the lag between two arrays where they have the greatest number of the same
-    values.
+    values. This functions assumes that the lag is less than 120,000 points.
 
     Parameters
     ----------
@@ -137,11 +137,6 @@ def find_sync_lag(array1, array2, length=None, plot=False):
 
     array2 : array, Series or similar
         The array to look for in the first.
-
-    length : int, optional
-        The distance to traverse the two arrays looking for the best match. Default:
-        half the length of array1. This cannot be greater than half the length of either
-        array.
 
     plot : string, optional
         False (default), or a path specifying where to save a png of the best match.  If
@@ -156,11 +151,8 @@ def find_sync_lag(array1, array2, length=None, plot=False):
         aligned with the calculated lag, for the length compared.
 
     """
-    if length is None:
-        length = len(array1) // 2
-
-    if len(array1) < length * 2 or len(array2) < length * 2:
-        raise Exception(f'Arrays must be at least twice the size of length parameter.')
+    length = min(len(array1), len(array2)) // 2
+    length = min(length, 120000)
 
     array1 = array1.squeeze()
     array2 = array2.squeeze()
