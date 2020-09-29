@@ -183,7 +183,7 @@ def read_tdms(path, groups=None):
             for group in groups:
                 channel = tdms_file[group].channels()[0]
                 group_data = tdms_file[group].as_dataframe()
-                group_data = group_data.rename(columns={channel.name:channel.path})
+                group_data = group_data.rename(columns={channel.name: channel.path})
                 data.append(group_data)
             df = pd.concat(data, axis=1)
     return df
@@ -297,7 +297,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
         mouse_sessions = list(raw_dir.glob(f'*{mouse}*'))
 
         if mouse_sessions:
-            meta_file = meta_dir / (mouse + '.json') 
+            meta_file = meta_dir / (mouse + '.json')
             with meta_file.open() as fd:
                 mouse_meta = json.load(fd)
             session_dates = [

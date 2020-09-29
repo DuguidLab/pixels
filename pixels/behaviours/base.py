@@ -4,11 +4,8 @@ base for defining behaviour-specific processing.
 """
 
 
-import datetime
 import json
-import os
 import tarfile
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import copyfile
@@ -197,7 +194,9 @@ class Behaviour(ABC):
         Process behavioural data from raw tdms and align to neuropixels data.
         """
         for rec_num, recording in enumerate(self.files):
-            print(f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}")
+            print(
+                f">>>>> Processing behaviour for recording {rec_num + 1} of {len(self.files)}"
+            )
 
             print(f"> Loading behavioural data")
             behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
@@ -239,7 +238,9 @@ class Behaviour(ABC):
         Process the spike data from the raw neural recording data.
         """
         for rec_num, recording in enumerate(self.files):
-            print(f">>>>> Processing spike data for recording {rec_num + 1} of {len(self.files)}")
+            print(
+                f">>>>> Processing spike data for recording {rec_num + 1} of {len(self.files)}"
+            )
 
             data_file = self.find_file(recording['spike_data'])
             orig_rate = self.spike_meta[rec_num]['imSampRate']
@@ -490,7 +491,9 @@ class Behaviour(ABC):
         if data in 'behavioural':
             data = 'behavioural'
         if data not in ['behavioural', 'spike', 'lfp']:
-            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
+            raise PixelsError(
+                f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'"
+            )
         getter = f"get_{data}_data"
         if raw:
             data, sample_rate = getattr(self, f"{getter}_raw")()
@@ -520,7 +523,9 @@ class Behaviour(ABC):
                 trial = data[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
 
-        trials = pd.concat(trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"])
+        trials = pd.concat(
+            trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
+        )
         trials = trials.sort_index(level=1, axis=1)
         trials = trials.reorder_levels(["unit", "trial"], axis=1)
 

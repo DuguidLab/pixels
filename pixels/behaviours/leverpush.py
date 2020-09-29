@@ -10,6 +10,7 @@ import pandas as pd
 from pixels import Experiment
 from pixels import signal
 from pixels.behaviours import Behaviour
+from pixels.error import PixelsError
 
 
 class ActionLabels:
@@ -114,7 +115,7 @@ class LeverPush(Behaviour):
             axes[5].plot(action_labels[:, 0])
             axes[6].plot(action_labels[:, 1])
             plt.show()
-    
+
         return action_labels
 
     def extract_ITIs(self, label, data, raw=False):
@@ -147,7 +148,9 @@ class LeverPush(Behaviour):
         if data in 'behavioural':
             data = 'behavioural'
         if data not in ['behavioural', 'spike', 'lfp']:
-            raise PixelsError(f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'")
+            raise PixelsError(
+                f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'"
+            )
         getter = f"get_{data}_data"
         if raw:
             data, sample_rate = getattr(self, f"{getter}_raw")()
@@ -176,7 +179,9 @@ class LeverPush(Behaviour):
                 iti = data[rec_num][start + 1:end]
                 itis.append(iti.reset_index(drop=True))
 
-        itis = pd.concat(itis, axis=1, copy=False, keys=range(len(itis)), names=["trial", "unit"])
+        itis = pd.concat(
+            itis, axis=1, copy=False, keys=range(len(itis)), names=["trial", "unit"]
+        )
         itis = itis.sort_index(level=1, axis=1)
         itis = itis.reorder_levels(["unit", "trial"], axis=1)
 
