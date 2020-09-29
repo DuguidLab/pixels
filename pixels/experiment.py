@@ -13,27 +13,27 @@ from pixels.error import PixelsError
 
 
 class Experiment:
+    """
+    This represents an experiment and can be used to process or analyse data for a
+    group of mice.
+
+    Parameters
+    ----------
+    mouse_ids : list of strs
+        List of IDs of the mice to be included in this experiment.
+
+    behaviour : class
+        Class definition subclassing from pixels.behaviours.Behaviour.
+
+    data_dir : str
+        Path to the top-level folder containing data for these mice. This folder
+        should contain these folders: raw, interim, processed
+
+    meta_dir : str
+        Path to the folder containing training metadata JSON files.
+
+    """
     def __init__(self, mouse_ids, behaviour, data_dir, meta_dir):
-        """
-        This represents an experiment and can be used to process or analyse data for a
-        group of mice.
-
-        Parameters
-        ----------
-        mouse_ids : list of strs
-            List of IDs of the mice to be included in this experiment.
-
-        behaviour : class
-            Class definition subclassing from pixels.behaviours.Behaviour.
-
-        data_dir : str
-            Path to the top-level folder containing data for these mice. This folder
-            should contain these folders: raw, interim, processed
-
-        meta_dir : str
-            Path to the folder containing training metadata JSON files.
-
-        """
         if not isinstance(mouse_ids, (list, tuple, set)):
             mouse_ids = [mouse_ids]
 

@@ -7,10 +7,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from pixels import Experiment
+from pixels import Experiment, PixelsError
 from pixels import signal
 from pixels.behaviours import Behaviour
-from pixels.error import PixelsError
 
 
 class ActionLabels:
@@ -82,7 +81,7 @@ class LeverPush(Behaviour):
 
         for reward in reward_onsets:
             previous_tone = tone_onsets[np.where(reward - tone_onsets >= 0)[0]]
-            if len(previous_tone):
+            if previous_tone:
                 action_labels[previous_tone[-1], 0] = ActionLabels.rewarded_push
 
         for tone in tone_onsets:
@@ -92,12 +91,12 @@ class LeverPush(Behaviour):
         for push in back_sensor_onsets:
             previous_tone = tone_onsets[np.where(push - tone_onsets >= 0)[0]]
 
-            if not len(previous_tone):
+            if not previous_tone:
                 action_labels[push, 0] = ActionLabels.uncued_push
                 continue  # no tones yet, must be uncued
 
             previous_reset = reset_onsets[np.where(push - reset_onsets >= 0)[0]]
-            if not len(previous_reset):
+            if not previous_reset:
                 continue  # if no resets yet, must be within trial
 
             if previous_reset[-1] < previous_tone[-1]:
@@ -106,7 +105,7 @@ class LeverPush(Behaviour):
 
         if plot:
             plt.clf()
-            fig, axes = plt.subplots(7, 1, sharex=True, sharey=True)
+            _, axes = plt.subplots(7, 1, sharex=True, sharey=True)
             axes[0].plot(back_sensor_signal)
             axes[1].plot(behavioural_data["/'Front_Sensor'/'0'"].values)
             axes[2].plot(reward_signal)

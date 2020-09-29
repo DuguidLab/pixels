@@ -73,7 +73,7 @@ def resample(array, from_hz, to_hz, padtype=None):
     if chunks > 1:
         print(f"    0%", end="\r")
     current = 0
-    for i in range(chunks):
+    for _ in range(chunks):
         chunk_data = array[:, current:min(current + chunk_size, cols)]
         result = scipy.signal.resample_poly(
             chunk_data.T, up, down, padtype=padtype or 'minimum'

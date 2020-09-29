@@ -22,26 +22,26 @@ BEHAVIOUR_HZ = 25000
 
 
 class Behaviour(ABC):
+    """
+    This class represents a single individual recording session.
+
+    Parameters
+    ----------
+    name : str
+        The name of the session in the form YYMMDD_mouseID.
+
+    data_dir : pathlib.Path
+        The top level data folder, containing raw, interim and processed folders.
+
+    metadata : dict, optional
+        A dictionary of metadata for this session. This is typically taken from the
+        session's JSON file.
+
+    """
 
     sample_rate = 1000
 
     def __init__(self, name, data_dir, metadata=None):
-        """
-        This class represents a single individual recording session.
-
-        Parameters
-        ----------
-        name : str
-            The name of the session in the form YYMMDD_mouseID.
-
-        data_dir : pathlib.Path
-            The top level data folder, containing raw, interim and processed folders.
-
-        metadata : dict, optional
-            A dictionary of metadata for this session. This is typically taken from the
-            session's JSON file.
-
-        """
         self.name = name
         self.data_dir = data_dir
         self.metadata = metadata
@@ -125,6 +125,8 @@ class Behaviour(ABC):
             with tarfile.open(tar) as open_tar:
                 open_tar.extractall(path=self.interim)
             return interim
+
+        return None
 
     def sync_data(self, rec_num, behavioural_data=None, sync_channel=None):
         """
@@ -304,7 +306,7 @@ class Behaviour(ABC):
         """
         Extract behavioural videos from TDMS to avi.
         """
-        for rec_num, recording in enumerate(self.files):
+        for recording in self.files:
             path = self.find_file(recording['camera_data'])
             path_avi = path.with_suffix('.avi')
             if path_avi.exists():
@@ -331,7 +333,8 @@ class Behaviour(ABC):
         """
         Run DeepLabCut motion tracking on behavioural videos.
         """
-        import deeplabcut  # bloated so imported when needed
+        # bloated so imported when needed
+        import deeplabcut  # pylint: disable=import-error
 
         self.extract_videos()
 
@@ -339,7 +342,7 @@ class Behaviour(ABC):
         if not config.exists():
             raise PixelsError(f"Config at {config} not found.")
 
-        for rec_num, recording in enumerate(self.files):
+        for recording in self.files:
             video = self.find_file(recording['camera_data']).with_suffix('.avi')
             if not video.exists():
                 raise PixelsError(f"Path {video} should exist but doesn't... discuss.")

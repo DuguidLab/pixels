@@ -8,11 +8,11 @@ import glob
 import json
 import os
 from pathlib import Path
+from tempfile import gettempdir
 
 import ffmpeg
 import numpy as np
 import pandas as pd
-from tempfile import gettempdir
 from nptdms import TdmsFile
 
 from pixels.error import PixelsError
@@ -211,17 +211,17 @@ def save_ndarray_as_avi(video, path, frame_rate):
 
     process = (
         ffmpeg
-            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
-            .output(path.as_posix(), pix_fmt='yuv420p', vcodec='libx264', r=frame_rate)
-            .overwrite_output()
-            .run_async(pipe_stdin=True)
+        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
+        .output(path.as_posix(), pix_fmt='yuv420p', vcodec='libx264', r=frame_rate)
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
     )
 
     for frame in video:
         process.stdin.write(
             np.stack([frame, frame, frame], axis=2)
-                .astype(np.uint8)
-                .tobytes()
+            .astype(np.uint8)
+            .tobytes()
         )
 
     process.stdin.close()
