@@ -182,3 +182,20 @@ def find_sync_lag(array1, array2, plot=False):
         print(f"    Sync plot saved to:\n    {plot}")
 
     return lag, match
+
+
+def median_subtraction(array):
+    """
+    Subtract the median of every column from that column.
+
+    Parameters
+    ----------
+    array : array, Series or similar
+        The array to process.
+
+    Returns
+    -------
+    array : The processed away with medians subtracted.
+
+    """
+    return array - np.median(array, axis=0)

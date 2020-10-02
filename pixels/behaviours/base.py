@@ -248,8 +248,12 @@ class Behaviour(ABC):
             orig_rate = self.spike_meta[rec_num]['imSampRate']
             num_chans = self.spike_meta[rec_num]['nSavedChans']
 
+
             print("> Mapping spike data")
             data = ioutils.read_bin(data_file, num_chans)
+
+            print("> Performing median subtraction")
+            data = signal.median_subtraction(data)
 
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
