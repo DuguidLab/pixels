@@ -52,8 +52,8 @@ def get_data_files(data_dir, session_name):
     spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta*')
     lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin*')
     lfp_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.meta*')
-    behaviour = glob.glob(f'{data_dir}/NeuropixelBehaviour([0-9]).tdms*')
-    camera = glob.glob(f'{data_dir}/USB_Camera*.tdms*')
+    behaviour = glob.glob(f'{data_dir}/[0-9a-zA-Z_-]*([0-9]).tdms*')
+    camera = glob.glob(f'{data_dir}/*Camera*.tdms*')
     camera_data = []
     camera_meta = []
     for match in camera:
@@ -304,6 +304,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
                 datetime.datetime.strptime(s.stem[0:6], '%y%m%d') for s in mouse_sessions
             ]
 
+            s = 0
             for i, session in enumerate(mouse_meta):
                 try:
                     meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
@@ -312,11 +313,15 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
 
                 for index, ses_date in enumerate(session_dates):
                     if ses_date == meta_date and not session.get('exclude', False):
+                        s += 1
                         sessions.append(dict(
                             sessions=mouse_sessions[index].stem,
                             metadata=session,
                             data_dir=data_dir,
                         ))
+            if s == 0:
+                print(f'No session dates match between folders and metadata for: {mouse}')
+
         else:
             print(f'Found no sessions for: {mouse}')
 
