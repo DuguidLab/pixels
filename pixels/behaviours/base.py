@@ -12,6 +12,9 @@ from shutil import copyfile
 
 import numpy as np
 import pandas as pd
+import spikeextractors as se
+import spikesorters as ss
+import spiketoolkit as st
 
 from pixels import ioutils
 from pixels import signal
@@ -248,7 +251,6 @@ class Behaviour(ABC):
             orig_rate = self.spike_meta[rec_num]['imSampRate']
             num_chans = self.spike_meta[rec_num]['nSavedChans']
 
-
             print("> Mapping spike data")
             data = ioutils.read_bin(data_file, num_chans)
 
@@ -301,10 +303,33 @@ class Behaviour(ABC):
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 
-    def extract_spikes(self):
+    def sort_spikes(self):
         """
-        Extract the spikes from raw spike data.
+        Run kilosort2 spike sorting on raw spike data.
         """
+        for rec_num, recording in enumerate(self.files):
+            print(
+                f">>>>> Spike sorting recording {rec_num + 1} of {len(self.files)}"
+            )
+
+            output = self.processed / 'sorted'
+            data_file = self.find_file(recording['spike_data'])
+            recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
+
+            print(f"> Bandpass filtering and median subtracting.")
+            recording = st.preprocessing.bandpass_filter(recording, freq_min=300, freq_max=6000)
+            recording = st.preprocessing.common_reference(recording, reference='median')
+
+            print(f"> Running kilosort2")
+            sorting_ks2 = ss.run_kilosort2(
+                recording=recording, output_folder=output, freq_min=300,
+            )
+
+            # Do we want to do this too?
+            #snrs_ks2 = st.validation.compute_snrs(sorting_ks2, recording)
+
+            #print(f"> Exporting to phy")
+            #st.postprocessing.export_to_phy(recording, sorting_ks2, output_folder=output)
 
     def extract_videos(self):
         """

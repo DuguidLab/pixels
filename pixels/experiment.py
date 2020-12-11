@@ -86,12 +86,12 @@ class Experiment:
         for session in self.sessions:
             session.process_spikes()
 
-    def extract_spikes(self):
+    def sort_spikes(self):
         """
         Extract the spikes from raw spike data for all sessions.
         """
         for session in self.sessions:
-            session.extract_spikes()
+            session.sort_spikes()
 
     def process_lfp(self):
         """
