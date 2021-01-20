@@ -64,6 +64,7 @@ def resample(array, from_hz, to_hz, padtype=None):
         array = array.reshape((-1, cols))
     else:
         cols = array.shape[1]
+
     # resample_poly preallocates an entire new array of float64 values, so to prevent
     # MemoryErrors we will run it with 5GB chunks
     size_bytes = array[0].dtype.itemsize * array.size
@@ -76,13 +77,13 @@ def resample(array, from_hz, to_hz, padtype=None):
     for _ in range(chunks):
         chunk_data = array[:, current:min(current + chunk_size, cols)]
         result = scipy.signal.resample_poly(
-            chunk_data.T, up, down, padtype=padtype or 'minimum'
+            chunk_data, up, down, axis=0, padtype=padtype or 'minimum'
         )
         new_data.extend(result)
         current += chunk_size
         print(f"    {100 * current / cols:.1f}%", end="\r")
 
-    return np.stack(new_data, axis=1).astype(np.int16)
+    return np.stack(new_data, axis=0).astype(np.int16)
 
 
 def binarise(data):
