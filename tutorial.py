@@ -48,8 +48,8 @@ myexp.process_lfp()
 # This aligns, crops, and downsamples spike data.
 myexp.process_spikes()
 
-# This performs spike sorting, and ... (TODO)
-myexp.spike_sort()
+# This runs the spike sorting algorithm and outputs the results in a form usable by phy.
+myexp.sort_spikes()
 
 # This extracts posture coordinates from TDMS videos using DeepLabCut
 config = '/path/to/this/behaviours/deeplabcut/config.yaml'
