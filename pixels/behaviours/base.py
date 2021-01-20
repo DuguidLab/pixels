@@ -52,12 +52,15 @@ class Behaviour(ABC):
         self.raw = self.data_dir / 'raw' / self.name
         self.interim = self.data_dir / 'interim' / self.name
         self.processed = self.data_dir / 'processed' / self.name
-        self.interim.mkdir(parents=True, exist_ok=True)
         self.files = ioutils.get_data_files(self.raw, name)
+
+        self.interim.mkdir(parents=True, exist_ok=True)
+        self.processed.mkdir(parents=True, exist_ok=True)
 
         self._action_labels = None
         self._behavioural_data = None
         self._spike_data = None
+        self._spike_times_data = None
         self._lfp_data = None
         self._lag = None
         self.drop_data()
@@ -76,6 +79,7 @@ class Behaviour(ABC):
         self._action_labels = [None] * len(self.files)
         self._behavioural_data = [None] * len(self.files)
         self._spike_data = [None] * len(self.files)
+        self._spike_times_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
         self._load_lag()
 
@@ -169,7 +173,7 @@ class Behaviour(ABC):
             num_chans = self.lfp_meta[rec_num]['nSavedChans']
             sync_channel = ioutils.read_bin(data_file, num_chans, channel=384)
             orig_rate = int(self.lfp_meta[rec_num]['imSampRate'])
-            sync_channel = sync_channel[:120 * orig_rate * 2]  # 2 mins, rec Hz, back/forward
+            #sync_channel = sync_channel[:120 * orig_rate * 2]  # 2 mins, rec Hz, back/forward
             sync_channel = signal.resample(sync_channel, orig_rate, self.sample_rate)
 
         behavioural_data = signal.binarise(behavioural_data)
@@ -180,19 +184,19 @@ class Behaviour(ABC):
         lag_start, match = signal.find_sync_lag(
             behavioural_data, sync_channel, plot=plot,
         )
-        if match < 95:
-            print("    The sync channels did not match very well. Check the plot.")
 
         lag_end = len(behavioural_data) - (lag_start + len(sync_channel))
         self._lag[rec_num] = (lag_start, lag_end)
+
+        if match < 95:
+            print("    The sync channels did not match very well. Check the plot.")
+        print(f"    Calculated lag: {(lag_start, lag_end)}")
 
         lag_json = []
         for lag_start, lag_end in self._lag:
             lag_json.append(dict(lag_start=lag_start, lag_end=lag_end))
         with (self.processed / 'lag.json').open('w') as fd:
             json.dump(lag_json, fd)
-
-        return
 
     def process_behaviour(self):
         """
@@ -206,28 +210,31 @@ class Behaviour(ABC):
             print(f"> Loading behavioural data")
             behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
 
+            # ignore any columns that have Nans; these just contain settings
+            for col in behavioural_data:
+                if behavioural_data[col].isnull().values.any():
+                    behavioural_data.drop(col, axis=1, inplace=True)
+
             print(f"> Downsampling to {self.sample_rate} Hz")
             behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
             behavioural_data.iloc[:len(behav_array), :] = behav_array
             behavioural_data = behavioural_data[:len(behav_array)]
-            del behav_array
 
+            print(f"> Syncing to Neuropixels data")
             if self._lag[rec_num] is None:
                 self.sync_data(
                     rec_num,
                     behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values,
                 )
             lag_start, lag_end = self._lag[rec_num]
-
-            print(f"> Extracting action labels")
             behavioural_data = behavioural_data[max(lag_start, 0):-1-max(lag_end, 0)]
             behavioural_data.index = range(len(behavioural_data))
-            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
 
+            print(f"> Extracting action labels")
+            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
             output = self.processed / recording['action_labels']
-            print(f"> Saving action labels to:")
-            print(f"    {output}")
             np.save(output, self._action_labels[rec_num])
+            print(f">   Saved to: {output}")
 
             output = self.processed / recording['behaviour_processed']
             print(f"> Saving downsampled behavioural data to:")
@@ -312,7 +319,7 @@ class Behaviour(ABC):
                 f">>>>> Spike sorting recording {rec_num + 1} of {len(self.files)}"
             )
 
-            output = self.processed / 'sorted'
+            output = self.processed / f'sorted_{rec_num}'
             data_file = self.find_file(recording['spike_data'])
             recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
 
@@ -452,6 +459,32 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
+    def get_spike_times_data(self):
+        """
+        Returns the sorted spike times.
+        """
+        saved = self._spike_times_data
+        if saved[0] is None:
+            for rec_num, recording in enumerate(self.files):
+                times = self.processed / f'sorted_{rec_num}' / 'spike_times.npy'
+                clust = self.processed / f'sorted_{rec_num}' / 'spike_clusters.npy'
+
+                try:
+                    times = np.load(times)
+                    clust = np.load(clust)
+                except FileNotFoundError:
+                    msg = ": Can't load spike times that haven't been extracted!"
+                    raise PixelsError(self.name + msg)
+
+                by_clust = []
+                for c in range(clust.max() + 1):
+                    by_clust.append(times[clust == c])
+                df = pd.DataFrame()
+                raise Exception
+
+                saved[rec_num] = np.load(file_path)
+        return saved
+
     def _get_neuro_raw(self, kind):
         raw = []
         meta = getattr(self, f"{kind}_meta")
@@ -506,31 +539,28 @@ class Behaviour(ABC):
             An event type value to specify which event to align the trials to.
 
         data : str
-            One of 'behaviour', 'spike' or 'lfp'.
+            One of 'behaviour', 'spike', 'spike_times' or 'lfp'.
 
         raw : bool, optional
             Whether to get raw, unprocessed data instead of processed and downsampled
             data. Defaults to False.
 
         duration : int/float, optional
-            The length of time desired in the output.
+            The length of time in seconds desired in the output. Default is 1 second.
 
         """
         print(f"Aligning {'raw ' if raw else ''}{data} data to trials.")
         data = data.lower()
         action_labels = self.get_action_labels()
 
-        if data in 'behavioural':
-            data = 'behavioural'
-        if data not in ['behavioural', 'spike', 'lfp']:
-            raise PixelsError(
-                f"align_trials: data parameter should be 'behaviour', 'spike' or 'lfp'"
-            )
-        getter = f"get_{data}_data"
+        data_options = ['behavioural', 'spike', 'spike_times', 'lfp']
+        if data not in data_options:
+            raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
+
         if raw:
-            data, sample_rate = getattr(self, f"{getter}_raw")()
+            data, sample_rate = getattr(self, f"get_{data}_data_raw")()
         else:
-            data = getattr(self, getter)()
+            data = getattr(self, f"get_{data}_data")()
             sample_rate = self.sample_rate
 
         if not data or data[0] is None:
