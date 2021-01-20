@@ -75,8 +75,9 @@ def get_data_files(data_dir, session_name):
             recording['behaviour'] = original_name(behaviour[num])
         else:
             recording['behaviour'] = original_name(behaviour[0])
-        recording['camera_data'] = original_name(camera_data[num])
-        recording['camera_meta'] = original_name(camera_meta[num])
+        if len(camera_data) > num:
+            recording['camera_data'] = original_name(camera_data[num])
+            recording['camera_meta'] = original_name(camera_meta[num])
         recording['action_labels'] = Path(f'action_labels_{num}.npy')
         recording['behaviour_processed'] = recording['behaviour'].with_name(
             recording['behaviour'].stem + '_processed.h5'
