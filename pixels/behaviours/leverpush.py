@@ -81,7 +81,7 @@ class LeverPush(Behaviour):
 
         for reward in reward_onsets:
             previous_tone = tone_onsets[np.where(reward - tone_onsets >= 0)[0]]
-            if previous_tone:
+            if previous_tone.size:
                 action_labels[previous_tone[-1], 0] = ActionLabels.rewarded_push
 
         for tone in tone_onsets:
@@ -91,12 +91,12 @@ class LeverPush(Behaviour):
         for push in back_sensor_onsets:
             previous_tone = tone_onsets[np.where(push - tone_onsets >= 0)[0]]
 
-            if not previous_tone:
+            if not previous_tone.size:
                 action_labels[push, 0] = ActionLabels.uncued_push
                 continue  # no tones yet, must be uncued
 
             previous_reset = reset_onsets[np.where(push - reset_onsets >= 0)[0]]
-            if not previous_reset:
+            if not previous_reset.size:
                 continue  # if no resets yet, must be within trial
 
             if previous_reset[-1] < previous_tone[-1]:
