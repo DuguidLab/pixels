@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import scipy.signal
 
+from pixels import PixelsError
+
 
 def resample(array, from_hz, to_hz, padtype=None):
     """
@@ -185,18 +187,28 @@ def find_sync_lag(array1, array2, plot=False):
     return lag, match
 
 
-def median_subtraction(array):
+def median_subtraction(array, axis):
     """
-    Subtract the median of every column from that column.
+    Subtract the medians of a given axis.
 
     Parameters
     ----------
     array : array, Series or similar
         The array to process.
 
+    axis : int
+        The axis in which to take the median and subtract.
+
     Returns
     -------
-    array : The processed away with medians subtracted.
+    array : The processed array with medians subtracted.
 
     """
-    return array - np.median(array, axis=0)
+    if not array.ndim > axis:
+        raise PixelsError("Not enough dimensions to perform median subtraction.")
+
+    #for i in range(array.shape[axis]):
+    array = np.median(array, axis=axis, keepdims=True)
+    #    array[:, i] = array[:, i] - np.median(array[:, i], axis=axis)
+
+    return array

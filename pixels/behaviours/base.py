@@ -261,8 +261,10 @@ class Behaviour(ABC):
             print("> Mapping spike data")
             data = ioutils.read_bin(data_file, num_chans)
 
-            print("> Performing median subtraction")
-            data = signal.median_subtraction(data)
+            #print("> Performing median subtraction across rows")  # TODO: fix
+            #data = signal.median_subtraction(data, axis=0)
+            #print("> Performing median subtraction across columns")
+            #data = signal.median_subtraction(data, axis=1)
 
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
