@@ -7,6 +7,7 @@ base for defining behaviour-specific processing.
 import json
 import tarfile
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from pathlib import Path
 from shutil import copyfile
 
@@ -314,7 +315,7 @@ class Behaviour(ABC):
 
     def sort_spikes(self):
         """
-        Run kilosort2 spike sorting on raw spike data.
+        Run kilosort spike sorting on raw spike data.
         """
         for rec_num, recording in enumerate(self.files):
             print(
@@ -329,8 +330,8 @@ class Behaviour(ABC):
             recording = st.preprocessing.bandpass_filter(recording, freq_min=300, freq_max=6000)
             recording = st.preprocessing.common_reference(recording, reference='median')
 
-            print(f"> Running kilosort2")
-            sorting_ks2 = ss.run_kilosort2(
+            print(f"> Running kilosort")
+            sorting_ks = ss.run_kilosort3(
                 recording=recording, output_folder=output, freq_min=300,
             )
 
@@ -432,8 +433,8 @@ class Behaviour(ABC):
                     elif file_path.suffix == '.h5':
                         saved[rec_num] = ioutils.read_hdf5(file_path)
                 else:
-                    print(f"Could not find {attr[1:]} for recording {rec_num}.")
-                    saved[rec_num] = None
+                    msg = f"Could not find {attr[1:]} for recording {rec_num}."
+                    raise PixelsError(msg)
         return saved
 
     def get_action_labels(self):
@@ -455,13 +456,19 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_spike_data", "spike_processed")
 
+    def get_spike_rate_data(self):
+        """
+        Returns the spike rate data.
+        """
+        return self._get_processed_data("_spike_rate_data", "spike_processed")
+
     def get_lfp_data(self):
         """
         Returns the processed and downsampled LFP data.
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
-    def get_spike_times_data(self):
+    def _get_spike_times(self):
         """
         Returns the sorted spike times.
         """
@@ -478,14 +485,64 @@ class Behaviour(ABC):
                     msg = ": Can't load spike times that haven't been extracted!"
                     raise PixelsError(self.name + msg)
 
-                by_clust = []
+                times = np.squeeze(times)
+                clust = np.squeeze(clust)
+                by_clust = {}
                 for c in range(clust.max() + 1):
-                    by_clust.append(times[clust == c])
-                df = pd.DataFrame()
-                raise Exception
-
-                saved[rec_num] = np.load(file_path)
+                    by_clust[c] = pd.Series(times[clust == c])
+                saved[rec_num]  = pd.DataFrame(by_clust)
         return saved
+
+    def _get_aligned_spike_times(self, label, event, duration):
+        """
+        Returns spike times for each unit within a given time window around an event.
+        align_trials delegates to this function, and should be used for getting aligned
+        data in scripts.
+        """
+        all_times = self._get_spike_times()
+        action_labels = self.get_action_labels()
+        trials = []
+
+        scan_duration = self.sample_rate * 5
+        half = (self.sample_rate * duration) // 2
+
+        for rec_num in range(len(self.files)):
+            try:
+                times = np.load(self.processed / f'sorted_{rec_num}' / 'spike_times.npy')
+                clust = np.load(self.processed / f'sorted_{rec_num}' / 'spike_clusters.npy')
+            except FileNotFoundError:
+                msg = ": Can't load spike times that haven't been extracted!"
+                raise PixelsError(self.name + msg)
+
+            times = times.squeeze()
+            clust = clust.squeeze()
+            df = pd.DataFrame(np.vstack((times, clust)).T)
+
+            actions = action_labels[rec_num][:, 0]
+            events = action_labels[rec_num][:, 1]
+            trial_starts = np.where((actions == label))[0]
+
+            for i, start in enumerate(trial_starts):
+                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
+                # TODO: Check there isn't an off-by-1 error here
+                trial = df.loc[centre - half < df[0]]
+                trial = trial.loc[trial[0] <= centre + half]
+                trial[0] -= centre
+                tdf = []
+                for unit in np.unique(trial[1].values):
+                    tdf.append(
+                        pd.DataFrame({int(unit): trial.loc[trial[1] == unit][0].values})
+                    )
+                if tdf:
+                    this_trial = pd.concat(tdf, axis=1)
+                    trials.append(this_trial)
+
+        trials = pd.concat(
+            trials, axis=1, keys=range(len(trials)), names=["trial", "unit"]
+        )
+        trials = trials.reorder_levels(["unit", "trial"], axis=1)
+        trials = trials.sort_index(level=0, axis=1)
+        return trials
 
     def _get_neuro_raw(self, kind):
         raw = []
@@ -541,7 +598,7 @@ class Behaviour(ABC):
             An event type value to specify which event to align the trials to.
 
         data : str
-            One of 'behaviour', 'spike', 'spike_times' or 'lfp'.
+            One of 'behavioural', 'spike', 'spike_times', or 'lfp'.
 
         raw : bool, optional
             Whether to get raw, unprocessed data instead of processed and downsampled
@@ -551,21 +608,32 @@ class Behaviour(ABC):
             The length of time in seconds desired in the output. Default is 1 second.
 
         """
-        print(f"Aligning {'raw ' if raw else ''}{data} data to trials.")
         data = data.lower()
-        action_labels = self.get_action_labels()
 
         data_options = ['behavioural', 'spike', 'spike_times', 'lfp']
         if data not in data_options:
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
 
+        if data == "spike_times":
+            print(f"Aligning spike times to trials.")
+            # we let a dedicated function handle aligning spike times
+            return self._get_aligned_spike_times(label, event, duration)
+
+        action_labels = self.get_action_labels()
+
         if raw:
-            data, sample_rate = getattr(self, f"get_{data}_data_raw")()
+            print(f"Aligning raw {data} data to trials.")
+            getter = getattr(self, f"get_{data}_data_raw", None)
+            if not getter:
+                raise PixelsError(f"align_trials: {data} doesn't have a 'raw' option.")
+            values, sample_rate = getter()
+
         else:
-            data = getattr(self, f"get_{data}_data")()
+            print(f"Aligning {data} data to trials.")
+            values = getattr(self, f"get_{data}_data")()
             sample_rate = self.sample_rate
 
-        if not data or data[0] is None:
+        if not values or values[0] is None:
             raise PixelsError(f"align_trials: Could not get {data} data.")
 
         trials = []
@@ -584,7 +652,7 @@ class Behaviour(ABC):
             for start in trial_starts:
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
                 centre = int(centre * sample_rate / self.sample_rate)
-                trial = data[rec_num][centre - half + 1:centre + half + 1]
+                trial = values[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
 
         trials = pd.concat(
