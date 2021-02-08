@@ -83,35 +83,45 @@ class Experiment:
         """
         Process the spike data from the raw neural recording data for all sessions.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Processing spikes for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.process_spikes()
 
     def sort_spikes(self):
         """
         Extract the spikes from raw spike data for all sessions.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Sorting spikes for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.sort_spikes()
 
     def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data for all sessions.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Processing LFP data for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.process_lfp()
 
     def process_behaviour(self):
         """
         Process behavioural data from raw tdms files for all sessions.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Processing behaviour for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.process_behaviour()
 
     def extract_videos(self):
         """
         Extract videos from TDMS in the raw folder to avi files in the interim folder.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Extracting videos for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.extract_videos()
 
     def process_motion_tracking(self, config, create_labelled_video=True):
@@ -119,7 +129,9 @@ class Experiment:
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data, for all sessions.
         """
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Processing motion tracking for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
             session.process_motion_tracking(config, create_labelled_video)
 
     def align_trials(self, label, event, data, raw=False, duration=1):
