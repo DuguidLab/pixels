@@ -668,3 +668,18 @@ class Behaviour(ABC):
         trials = trials.set_index('time')
 
         return trials
+
+    def get_cluster_info(self):
+        cluster_info = []
+
+        for rec_num, recording in enumerate(self.files):
+            info_file = self.processed / f'sorted_{rec_num}' / 'cluster_info.tsv'
+            try:
+                info = pd.read_csv(info_file, sep='\t')
+            except FileNotFoundError:
+                msg = ": Can't load cluster info. Did you sort this session yet?"
+                raise PixelsError(self.name + msg)
+
+            cluster_info.append(info)
+
+        return cluster_info

@@ -149,3 +149,6 @@ class Experiment:
             names=["session", "unit", "trial"]
         )
         return df
+
+    def get_cluster_info(self):
+        return [s.get_cluster_info() for s in self.sessions]
