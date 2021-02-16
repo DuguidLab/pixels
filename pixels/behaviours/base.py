@@ -326,20 +326,8 @@ class Behaviour(ABC):
             data_file = self.find_file(recording['spike_data'])
             recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
 
-            print(f"> Bandpass filtering and median subtracting.")
-            recording = st.preprocessing.bandpass_filter(recording, freq_min=300, freq_max=6000)
-            recording = st.preprocessing.common_reference(recording, reference='median')
-
             print(f"> Running kilosort")
-            sorting_ks = ss.run_kilosort3(
-                recording=recording, output_folder=output, freq_min=300,
-            )
-
-            # Do we want to do this too?
-            #snrs_ks2 = st.validation.compute_snrs(sorting_ks2, recording)
-
-            #print(f"> Exporting to phy")
-            #st.postprocessing.export_to_phy(recording, sorting_ks2, output_folder=output)
+            ss.run_kilosort3(recording=recording, output_folder=output)
 
     def extract_videos(self):
         """
