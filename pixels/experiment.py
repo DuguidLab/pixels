@@ -79,6 +79,10 @@ class Experiment:
             rep += "\n\t" + session.name
         return rep
 
+    def set_cache(self, on):
+        for session in self.sessions:
+            session.set_cache(on)
+
     def process_spikes(self):
         """
         Process the spike data from the raw neural recording data for all sessions.

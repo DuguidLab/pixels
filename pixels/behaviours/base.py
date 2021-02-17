@@ -25,6 +25,24 @@ from pixels.error import PixelsError
 BEHAVIOUR_HZ = 25000
 
 
+def _cacheable(method):
+    def func(*args):
+        as_list = list(args)
+        self = as_list.pop(0)
+        if not self._use_cache:
+            return method(*args)
+
+        output = self.interim / 'cache' / ('_'.join(str(i) for i in as_list) + '.h5')
+        if output.exists():
+            df = ioutils.read_hdf5(output)
+        else:
+            df = method(*args)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            ioutils.write_hdf5(output, df)
+        return df
+    return func
+
+
 class Behaviour(ABC):
     """
     This class represents a single individual recording session.
@@ -64,6 +82,7 @@ class Behaviour(ABC):
         self._spike_times_data = None
         self._lfp_data = None
         self._lag = None
+        self._use_cache = False
         self.drop_data()
 
         self.spike_meta = [
@@ -83,6 +102,9 @@ class Behaviour(ABC):
         self._spike_times_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
         self._load_lag()
+
+    def set_cache(self, on):
+        self._use_cache = on
 
     def _load_lag(self):
         """
@@ -569,6 +591,7 @@ class Behaviour(ABC):
         """
         return self._get_neuro_raw('lfp')
 
+    @_cacheable
     def align_trials(self, label, event, data, raw=False, duration=1):
         """
         Get trials aligned to an event. This finds all instances of label in the action
