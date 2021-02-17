@@ -540,12 +540,12 @@ class Behaviour(ABC):
                 trial[0] -= centre
                 tdf = []
                 for unit in np.unique(trial[1].values):
-                    tdf.append(
-                        pd.DataFrame({int(unit): trial.loc[trial[1] == unit][0].values})
-                    )
+                    as_dict = {int(unit): trial.loc[trial[1] == unit][0].values}
+                    # remove double-counted spikes
+                    as_dict[int(unit)] = np.unique(as_dict[int(unit)])
+                    tdf.append(pd.DataFrame(as_dict))
                 if tdf:
-                    this_trial = pd.concat(tdf, axis=1)
-                    trials.append(this_trial)
+                    trials.append(pd.concat(tdf, axis=1))
 
         trials = pd.concat(
             trials, axis=1, keys=range(len(trials)), names=["trial", "unit"]
