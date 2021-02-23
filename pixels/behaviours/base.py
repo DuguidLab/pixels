@@ -26,8 +26,8 @@ BEHAVIOUR_HZ = 25000
 
 
 def _cacheable(method):
-    def func(*args):
-        as_list = list(args)
+    def func(*args, **kwargs):
+        as_list = list(args) + list(kwargs.values())
         self = as_list.pop(0)
         if not self._use_cache:
             return method(*args)
@@ -118,6 +118,16 @@ class Behaviour(ABC):
                 lag = json.load(fd)
             for rec_num, rec_lag in enumerate(lag):
                 self._lag[rec_num] = (rec_lag['lag_start'], rec_lag['lag_end'])
+
+    def get_probe_depth(self):
+        """
+        Load probe depth in um from file if it has been recorded.
+        """
+        depth_file = self.processed / 'depth.txt'
+        if depth_file.exists():
+            with depth_file.open() as fd:
+                return float(fd.read())
+        return None
 
     def find_file(self, name):
         """
@@ -503,7 +513,9 @@ class Behaviour(ABC):
                 saved[rec_num]  = pd.DataFrame(by_clust)
         return saved
 
-    def _get_aligned_spike_times(self, label, event, duration):
+    def _get_aligned_spike_times(
+        self, label, event, duration, group='good', min_depth=None, max_depth=None
+    ):
         """
         Returns spike times for each unit within a given time window around an event.
         align_trials delegates to this function, and should be used for getting aligned
@@ -512,9 +524,13 @@ class Behaviour(ABC):
         all_times = self._get_spike_times()
         action_labels = self.get_action_labels()
         trials = []
+        cluster_info = self.get_cluster_info()
 
-        scan_duration = self.sample_rate * 5
-        half = (self.sample_rate * duration) // 2
+        if min_depth is not None or max_depth is not None:
+            probe_depth = self.get_probe_depth()
+            if probe_depth is None:
+                msg = ": Can't load probe depth: please add it in um to processed/depth.txt"
+                raise PixelsError(self.name + msg)
 
         for rec_num in range(len(self.files)):
             try:
@@ -524,26 +540,43 @@ class Behaviour(ABC):
                 msg = ": Can't load spike times that haven't been extracted!"
                 raise PixelsError(self.name + msg)
 
+            orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+            scan_duration = orig_rate * 5
+            half = (orig_rate * duration) // 2
+
             times = times.squeeze()
             clust = clust.squeeze()
             df = pd.DataFrame(np.vstack((times, clust)).T)
+            rec_info = cluster_info[rec_num]
+            units = np.unique(clust)
 
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
+            f = orig_rate / self.sample_rate
 
             for i, start in enumerate(trial_starts):
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
-                # TODO: Check there isn't an off-by-1 error here
+                centre = int(centre * f - f / 2)
                 trial = df.loc[centre - half < df[0]]
                 trial = trial.loc[trial[0] <= centre + half]
                 trial[0] -= centre
                 tdf = []
-                for unit in np.unique(trial[1].values):
-                    as_dict = {int(unit): trial.loc[trial[1] == unit][0].values}
-                    # remove double-counted spikes
-                    as_dict[int(unit)] = np.unique(as_dict[int(unit)])
-                    tdf.append(pd.DataFrame(as_dict))
+                for unit in units:
+                    unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
+                    # we only want units that are in the specified group
+                    if unit_info['group'] == group:
+                        # and that are within the specified depth range
+                        if min_depth is not None:
+                            if probe_depth - unit_info['depth'] < min_depth:
+                                continue
+                        if max_depth is not None:
+                            if probe_depth - unit_info['depth'] > max_depth:
+                                continue
+                        as_dict = {int(unit): trial.loc[trial[1] == unit][0].values}
+                        # remove double-counted spikes
+                        as_dict[int(unit)] = np.unique(as_dict[int(unit)])
+                        tdf.append(pd.DataFrame(as_dict))
                 if tdf:
                     trials.append(pd.concat(tdf, axis=1))
 
@@ -592,7 +625,9 @@ class Behaviour(ABC):
         return self._get_neuro_raw('lfp')
 
     @_cacheable
-    def align_trials(self, label, event, data, raw=False, duration=1):
+    def align_trials(
+        self, label, event, data='spike_times', raw=False, duration=1, min_depth=0, max_depth=None
+    ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
         labels - these are the start times of the trials. Then this finds the first
@@ -608,8 +643,8 @@ class Behaviour(ABC):
         event : int
             An event type value to specify which event to align the trials to.
 
-        data : str
-            One of 'behavioural', 'spike', 'spike_times', or 'lfp'.
+        data : str, optional
+            One of 'spike_times' (default), 'behavioural', 'spike', or 'lfp'.
 
         raw : bool, optional
             Whether to get raw, unprocessed data instead of processed and downsampled
@@ -628,7 +663,9 @@ class Behaviour(ABC):
         if data == "spike_times":
             print(f"Aligning spike times to trials.")
             # we let a dedicated function handle aligning spike times
-            return self._get_aligned_spike_times(label, event, duration)
+            return self._get_aligned_spike_times(
+                label, event, duration, min_depth=min_depth, max_depth=max_depth
+            )
 
         action_labels = self.get_action_labels()
 
