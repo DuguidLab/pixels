@@ -85,7 +85,7 @@ def resample(array, from_hz, to_hz, padtype=None):
         current += chunk_size
         print(f"    {100 * current / cols:.1f}%", end="\r")
 
-    return np.stack(new_data, axis=0).astype(np.int16)
+    return np.stack(new_data, axis=0) #.astype(np.int16)
 
 
 def binarise(data):
