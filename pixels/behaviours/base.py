@@ -703,6 +703,9 @@ class Behaviour(ABC):
                 trial = values[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
 
+        if not trials:
+            raise PixelsError("Seems the action-event combo you asked for doesn't occur")
+
         trials = pd.concat(
             trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
         )
