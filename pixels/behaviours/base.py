@@ -13,6 +13,7 @@ from shutil import copyfile
 
 import numpy as np
 import pandas as pd
+import scipy.stats
 import spikeextractors as se
 import spikesorters as ss
 import spiketoolkit as st
@@ -508,13 +509,14 @@ class Behaviour(ABC):
                 times = np.squeeze(times)
                 clust = np.squeeze(clust)
                 by_clust = {}
-                for c in range(clust.max() + 1):
-                    by_clust[c] = pd.Series(times[clust == c])
+                for c in np.unique(clust):
+                    by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
                 saved[rec_num]  = pd.DataFrame(by_clust)
         return saved
 
     def _get_aligned_spike_times(
-        self, label, event, duration, group='good', min_depth=None, max_depth=None
+        self, label, event, duration, group='good', min_depth=None, max_depth=None,
+        kde=False
     ):
         """
         Returns spike times for each unit within a given time window around an event.
@@ -541,8 +543,14 @@ class Behaviour(ABC):
                 raise PixelsError(self.name + msg)
 
             orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+            f = orig_rate / self.sample_rate
             scan_duration = orig_rate * 5
-            half = (orig_rate * duration) // 2
+            full = orig_rate * duration
+            half = full // 2
+            if kde:
+                x_eval = np.arange(- full / f, full / f) + 1
+                x_eval /= 1000  # to seconds
+                out_index = np.arange(- half / f, half / f) + 1
 
             times = times.squeeze()
             clust = clust.squeeze()
@@ -553,19 +561,21 @@ class Behaviour(ABC):
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
-            f = orig_rate / self.sample_rate
 
             for i, start in enumerate(trial_starts):
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
                 centre = int(centre * f - f / 2)
-                trial = df.loc[centre - half < df[0]]
-                trial = trial.loc[trial[0] <= centre + half]
+                span = full if kde else half
+                trial = df.loc[centre - span < df[0]]
+                trial = trial.loc[trial[0] <= centre + span]
                 trial[0] -= centre
                 tdf = []
+
                 for unit in units:
                     unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
                     # we only want units that are in the specified group
                     if unit_info['group'] == group:
+
                         # and that are within the specified depth range
                         if min_depth is not None:
                             if probe_depth - unit_info['depth'] < min_depth:
@@ -573,10 +583,34 @@ class Behaviour(ABC):
                         if max_depth is not None:
                             if probe_depth - unit_info['depth'] > max_depth:
                                 continue
-                        as_dict = {int(unit): trial.loc[trial[1] == unit][0].values}
+
+                        uspikes = trial.loc[trial[1] == unit][0].values
                         # remove double-counted spikes
-                        as_dict[int(unit)] = np.unique(as_dict[int(unit)])
-                        tdf.append(pd.DataFrame(as_dict))
+                        uspikes = np.unique(uspikes)
+                        # should be in seconds
+                        uspikes = uspikes / 1000
+
+                        if kde:
+                            if uspikes.size == 0:
+                                # no spikes, just give it a string of zeros
+                                uspikes = np.zeros(x_eval.shape)
+                            else:
+                                if uspikes.size == 1:
+                                    # ugly hack to avoid gaussian_kde from complaining about
+                                    # needing multiple values. This shouldn't(TM) affect
+                                    # the final result as the value is later cut off by
+                                    # some distance.
+                                    uspikes = np.insert(uspikes, 0, 0)
+                                kern = scipy.stats.gaussian_kde(
+                                    uspikes / f, bw_method=0.01 * duration
+                                )
+                                uspikes = kern(x_eval) * len(uspikes)
+                            uspikes = uspikes[int(half / f):int(- half / f)]
+                            udf = pd.DataFrame({int(unit): uspikes})
+                            udf.set_index(out_index, inplace=True)
+                        else:
+                            udf = pd.DataFrame({int(unit): uspikes})
+                        tdf.append(udf)
                 if tdf:
                     trials.append(pd.concat(tdf, axis=1))
 
@@ -626,7 +660,8 @@ class Behaviour(ABC):
 
     @_cacheable
     def align_trials(
-        self, label, event, data='spike_times', raw=False, duration=1, min_depth=0, max_depth=None
+        self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
+        max_depth=None,
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -656,15 +691,16 @@ class Behaviour(ABC):
         """
         data = data.lower()
 
-        data_options = ['behavioural', 'spike', 'spike_times', 'lfp']
+        data_options = ['behavioural', 'spike', 'spike_times', 'spike_rate', 'lfp']
         if data not in data_options:
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
 
-        if data == "spike_times":
+        if data in ("spike_times", "spike_rate"):
             print(f"Aligning spike times to trials.")
             # we let a dedicated function handle aligning spike times
             return self._get_aligned_spike_times(
-                label, event, duration, min_depth=min_depth, max_depth=max_depth
+                label, event, duration, min_depth=min_depth, max_depth=max_depth,
+                kde=data == "spike_rate"
             )
 
         action_labels = self.get_action_labels()
