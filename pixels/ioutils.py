@@ -71,17 +71,21 @@ def get_data_files(data_dir, session_name):
         recording['spike_meta'] = original_name(spike_meta[num])
         recording['lfp_data'] = original_name(lfp_data[num])
         recording['lfp_meta'] = original_name(lfp_meta[num])
-        if len(behaviour) == len(spike_data):
-            recording['behaviour'] = original_name(behaviour[num])
+        if behaviour:
+            if len(behaviour) == len(spike_data):
+                recording['behaviour'] = original_name(behaviour[num])
+            else:
+                recording['behaviour'] = original_name(behaviour[0])
+            recording['behaviour_processed'] = recording['behaviour'].with_name(
+                recording['behaviour'].stem + '_processed.h5'
+            )
         else:
-            recording['behaviour'] = original_name(behaviour[0])
+            recording['behaviour'] = None
+            recording['behaviour_processed'] = None
         if len(camera_data) > num:
             recording['camera_data'] = original_name(camera_data[num])
             recording['camera_meta'] = original_name(camera_meta[num])
         recording['action_labels'] = Path(f'action_labels_{num}.npy')
-        recording['behaviour_processed'] = recording['behaviour'].with_name(
-            recording['behaviour'].stem + '_processed.h5'
-        )
         recording['spike_processed'] = recording['spike_data'].with_name(
             recording['spike_data'].stem + '_processed.h5'
         )
