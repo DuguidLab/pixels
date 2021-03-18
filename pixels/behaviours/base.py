@@ -768,6 +768,7 @@ class Behaviour(ABC):
 
         return cluster_info
 
+    @_cacheable
     def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
