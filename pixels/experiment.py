@@ -160,3 +160,6 @@ class Experiment:
 
     def get_cluster_info(self):
         return [s.get_cluster_info() for s in self.sessions]
+
+    def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
+        return [s.get_spike_widths() for s in self.sessions]

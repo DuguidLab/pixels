@@ -128,7 +128,7 @@ class Behaviour(ABC):
         if depth_file.exists():
             with depth_file.open() as fd:
                 return float(fd.read())
-        return None
+        raise PixelsError(self.name + ": Can't load probe depth: please add it in um to processed/depth.txt")
 
     def find_file(self, name):
         """
@@ -515,7 +515,7 @@ class Behaviour(ABC):
         return saved
 
     def _get_aligned_spike_times(
-        self, label, event, duration, group='good', min_depth=None, max_depth=None,
+        self, label, event, duration, group='good', min_depth=0, max_depth=None,
         kde=False
     ):
         """
@@ -530,9 +530,6 @@ class Behaviour(ABC):
 
         if min_depth is not None or max_depth is not None:
             probe_depth = self.get_probe_depth()
-            if probe_depth is None:
-                msg = ": Can't load probe depth: please add it in um to processed/depth.txt"
-                raise PixelsError(self.name + msg)
 
         for rec_num in range(len(self.files)):
             try:
@@ -770,3 +767,48 @@ class Behaviour(ABC):
             cluster_info.append(info)
 
         return cluster_info
+
+    def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
+        from phylib.io.model import load_model
+        from phylib.utils.color import selected_cluster_color
+
+        if min_depth is not None or max_depth is not None:
+            probe_depth = self.get_probe_depth()
+
+        cluster_info = self.get_cluster_info()
+        widths = []
+
+        for rec_num, recording in enumerate(self.files):
+            paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
+            model = load_model(paramspy)
+            rec_info = cluster_info[rec_num]
+            r_widths = {}
+
+            for unit in rec_info['id'].values:
+                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
+                # we only want units that are in the specified group
+                if unit_info['group'] == group:
+
+                    # and that are within the specified depth range
+                    if min_depth is not None:
+                        if probe_depth - unit_info['depth'] < min_depth:
+                            continue
+                    if max_depth is not None:
+                        if probe_depth - unit_info['depth'] > max_depth:
+                            continue
+
+                    # get the waveforms from only the best channel
+                    spike_ids = model.get_cluster_spikes(unit)
+                    best_chan = model.get_cluster_channels(unit)[0]
+                    waveforms = model.get_waveforms(spike_ids, [best_chan])
+                    waveforms = np.squeeze(waveforms)
+                    u_widths = []
+                    for spike in waveforms:
+                        trough = np.where(spike == min(spike))[0][0]
+                        after = spike[trough:]
+                        width = np.where(after == max(after))[0][0]
+                        u_widths.append(width)
+                    r_widths[unit] = np.median(u_widths)
+            widths.append(r_widths)
+
+        return widths
