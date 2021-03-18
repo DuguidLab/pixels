@@ -83,7 +83,7 @@ class Behaviour(ABC):
         self._spike_times_data = None
         self._lfp_data = None
         self._lag = None
-        self._use_cache = False
+        self._use_cache = True
         self.drop_data()
 
         self.spike_meta = [
