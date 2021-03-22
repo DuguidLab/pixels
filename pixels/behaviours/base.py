@@ -4,6 +4,7 @@ base for defining behaviour-specific processing.
 """
 
 
+import functools
 import json
 import tarfile
 from abc import ABC, abstractmethod
@@ -31,8 +32,9 @@ def _cacheable(method):
         as_list = list(args) + list(kwargs.values())
         self = as_list.pop(0)
         if not self._use_cache:
-            return method(*args)
+            return method(*args, **kwargs)
 
+        as_list.insert(0, method.__name__)
         output = self.interim / 'cache' / ('_'.join(str(i) for i in as_list) + '.h5')
         if output.exists():
             df = ioutils.read_hdf5(output)
@@ -783,7 +785,6 @@ class Behaviour(ABC):
             paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
             model = load_model(paramspy)
             rec_info = cluster_info[rec_num]
-            r_widths = {}
 
             for unit in rec_info['id'].values:
                 unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
@@ -809,7 +810,12 @@ class Behaviour(ABC):
                         after = spike[trough:]
                         width = np.where(after == max(after))[0][0]
                         u_widths.append(width)
-                    r_widths[unit] = np.median(u_widths)
-            widths.append(r_widths)
+                    widths.append((rec_num, unit, np.median(u_widths)))
 
-        return widths
+        df = pd.DataFrame(widths, columns=["rec_num", "unit", "median_ms"])
+
+        # convert to ms from sample points
+        orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+        df['median_ms'] = 1000 * df['median_ms'] / orig_rate
+
+        return df

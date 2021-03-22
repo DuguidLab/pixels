@@ -162,4 +162,13 @@ class Experiment:
         return [s.get_cluster_info() for s in self.sessions]
 
     def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
-        return [s.get_spike_widths() for s in self.sessions]
+        widths = [
+            s.get_spike_widths(group, min_depth, max_depth) for s in self.sessions
+        ]
+
+        df = pd.concat(
+            widths, axis=1, copy=False,
+            keys=range(len(widths)),
+            names=["session"]
+        )
+        return df
