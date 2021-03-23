@@ -483,7 +483,7 @@ class Behaviour(ABC):
         """
         Returns the spike rate data.
         """
-        return self._get_processed_data("_spike_rate_data", "spike_processed")
+        return self._get_processed_data("_spike_rate_data", "spike_rate_processed")
 
     def get_lfp_data(self):
         """
@@ -518,7 +518,7 @@ class Behaviour(ABC):
 
     def _get_aligned_spike_times(
         self, label, event, duration, group='good', min_depth=0, max_depth=None,
-        kde=False
+        min_spike_width=None, max_spike_width=None, kde=False
     ):
         """
         Returns spike times for each unit within a given time window around an event.
@@ -532,6 +532,15 @@ class Behaviour(ABC):
 
         if min_depth is not None or max_depth is not None:
             probe_depth = self.get_probe_depth()
+
+        if min_spike_width == 0:
+            min_spike_width = None
+        if min_spike_width is not None or max_spike_width is not None:
+            widths = self.get_spike_widths(
+                group=group, min_depth=min_depth, max_depth=max_depth
+            )
+        else:
+            widths = None
 
         for rec_num in range(len(self.files)):
             try:
@@ -561,6 +570,9 @@ class Behaviour(ABC):
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
 
+            if widths is not None:
+                rec_widths = widths[widths['rec_num'] == rec_num]
+
             for i, start in enumerate(trial_starts):
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
                 centre = int(centre * f - f / 2)
@@ -582,6 +594,17 @@ class Behaviour(ABC):
                         if max_depth is not None:
                             if probe_depth - unit_info['depth'] > max_depth:
                                 continue
+
+                        # and that have the specified median spike widths
+                        if widths is not None:
+                            width = rec_widths[rec_widths['unit'] == unit]['median_ms']
+                            assert len(width.values) == 1
+                            if min_spike_width is not None:
+                                if width.values[0] < min_spike_width:
+                                    continue
+                            if max_spike_width is not None:
+                                if width.values[0] > max_spike_width:
+                                    continue
 
                         uspikes = trial.loc[trial[1] == unit][0].values
                         # remove double-counted spikes
@@ -660,7 +683,7 @@ class Behaviour(ABC):
     @_cacheable
     def align_trials(
         self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
-        max_depth=None,
+        max_depth=None, min_spike_width=None, max_spike_width=None,
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -687,6 +710,22 @@ class Behaviour(ABC):
         duration : int/float, optional
             The length of time in seconds desired in the output. Default is 1 second.
 
+        min_depth : int, optional
+            (Only used when getting spike data). The minimum depth that units must be at
+            to be included. Default is 0 i.e. in the brain.
+
+        max_depth : int, optional
+            (Only used when getting spike data). The maximum depth that units must be at
+            to be included. Default is None i.e.  no maximum.
+
+        min_spike_width : int, optional
+            (Only used when getting spike data). The minimum median spike width that
+            units must have to be included. Default is None i.e. no minimum.
+
+        max_spike_width : int, optional
+            (Only used when getting spike data). The maximum median spike width that
+            units must have to be included. Default is None i.e. no maximum.
+
         """
         data = data.lower()
 
@@ -699,6 +738,7 @@ class Behaviour(ABC):
             # we let a dedicated function handle aligning spike times
             return self._get_aligned_spike_times(
                 label, event, duration, min_depth=min_depth, max_depth=max_depth,
+                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
                 kde=data == "spike_rate"
             )
 
