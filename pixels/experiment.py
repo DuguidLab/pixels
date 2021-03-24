@@ -163,9 +163,16 @@ class Experiment:
         return df
 
     def get_cluster_info(self):
+        """
+        Get some basic high-level information for each cluster. This is mostly just the
+        information seen in the table in phy.
+        """
         return [s.get_cluster_info() for s in self.sessions]
 
     def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
+        """
+        Get the widths of spikes for units matching the specified criteria.
+        """
         widths = [
             s.get_spike_widths(group, min_depth, max_depth) for s in self.sessions
         ]
@@ -177,9 +184,19 @@ class Experiment:
         )
         return df
 
-    def get_spike_waveforms(self, group='good', min_depth=0, max_depth=None):
+    def get_spike_waveforms(
+        self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
+        max_spike_width=None
+    ):
+        """
+        Get the waveforms of spikes for units matching the specified criteria.
+        """
         waveforms = [
-            s.get_spike_waveforms(group, min_depth, max_depth) for s in self.sessions
+            s.get_spike_waveforms(
+                group=group,
+                min_depth=min_depth, max_depth=max_depth,
+                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
+            ) for s in self.sessions
         ]
 
         df = pd.concat(

@@ -39,7 +39,7 @@ def _cacheable(method):
         if output.exists():
             df = ioutils.read_hdf5(output)
         else:
-            df = method(*args)
+            df = method(*args, **kwargs)
             output.parent.mkdir(parents=True, exist_ok=True)
             ioutils.write_hdf5(output, df)
         return df
@@ -815,58 +815,47 @@ class Behaviour(ABC):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
-        if min_depth is not None or max_depth is not None:
-            probe_depth = self.get_probe_depth()
-
-        cluster_info = self.get_cluster_info()
+        waveforms = self.get_spike_waveforms(
+            group=group, min_depth=min_depth, max_depth=max_depth
+        )
         widths = []
 
         for rec_num, recording in enumerate(self.files):
-            paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
-            model = load_model(paramspy)
-            rec_info = cluster_info[rec_num]
-
-            for unit in rec_info['id'].values:
-                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
-                # we only want units that are in the specified group
-                if unit_info['group'] == group:
-
-                    # and that are within the specified depth range
-                    if min_depth is not None:
-                        if probe_depth - unit_info['depth'] < min_depth:
-                            continue
-                    if max_depth is not None:
-                        if probe_depth - unit_info['depth'] > max_depth:
-                            continue
-
-                    # get the waveforms from only the best channel
-                    spike_ids = model.get_cluster_spikes(unit)
-                    best_chan = model.get_cluster_channels(unit)[0]
-                    waveforms = model.get_waveforms(spike_ids, [best_chan])
-                    waveforms = np.squeeze(waveforms)
-                    u_widths = []
-                    for spike in waveforms:
-                        trough = np.where(spike == min(spike))[0][0]
-                        after = spike[trough:]
-                        width = np.where(after == max(after))[0][0]
-                        u_widths.append(width)
-                    widths.append((rec_num, unit, np.median(u_widths)))
+            raise Exception
+            for unit in waveforms[rec_um].columns:
+                u_widths = []
+                for spike in waveforms[rec_num][unit]:
+                    trough = np.where(spike.values == min(spike))[0][0]
+                    after = spike.values[trough:]
+                    width = np.where(after == max(after))[0][0]
+                    u_widths.append(width)
+                widths.append((rec_num, unit, np.median(u_widths)))
 
         df = pd.DataFrame(widths, columns=["rec_num", "unit", "median_ms"])
-
         # convert to ms from sample points
         orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
         df['median_ms'] = 1000 * df['median_ms'] / orig_rate
-
         return df
 
     @_cacheable
-    def get_spike_waveforms(self, group='good', min_depth=0, max_depth=None):
+    def get_spike_waveforms(
+        self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
+        max_spike_width=None
+    ):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
         if min_depth is not None or max_depth is not None:
             probe_depth = self.get_probe_depth()
+
+        if min_spike_width == 0:
+            min_spike_width = None
+        if min_spike_width is not None or max_spike_width is not None:
+            widths = self.get_spike_widths(
+                group=group, min_depth=min_depth, max_depth=max_depth
+            )
+        else:
+            widths = None
 
         cluster_info = self.get_cluster_info()
         waveforms = []
@@ -877,6 +866,9 @@ class Behaviour(ABC):
             rec_info = cluster_info[rec_num]
             rec_forms = {}
 
+            if widths is not None:
+                rec_widths = widths[widths['rec_num'] == rec_num]
+
             for unit in rec_info['id'].values:
                 unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
                 # we only want units that are in the specified group
@@ -889,6 +881,17 @@ class Behaviour(ABC):
                     if max_depth is not None:
                         if probe_depth - unit_info['depth'] > max_depth:
                             continue
+
+                    # and that have the specified median spike widths
+                    if widths is not None:
+                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
+                        assert len(width.values) == 1
+                        if min_spike_width is not None:
+                            if width.values[0] < min_spike_width:
+                                continue
+                        if max_spike_width is not None:
+                            if width.values[0] > max_spike_width:
+                                continue
 
                     # get the waveforms from only the best channel
                     spike_ids = model.get_cluster_spikes(unit)
