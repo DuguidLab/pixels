@@ -859,3 +859,54 @@ class Behaviour(ABC):
         df['median_ms'] = 1000 * df['median_ms'] / orig_rate
 
         return df
+
+    @_cacheable
+    def get_spike_waveforms(self, group='good', min_depth=0, max_depth=None):
+        from phylib.io.model import load_model
+        from phylib.utils.color import selected_cluster_color
+
+        if min_depth is not None or max_depth is not None:
+            probe_depth = self.get_probe_depth()
+
+        cluster_info = self.get_cluster_info()
+        waveforms = []
+
+        for rec_num, recording in enumerate(self.files):
+            paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
+            model = load_model(paramspy)
+            rec_info = cluster_info[rec_num]
+            rec_forms = {}
+
+            for unit in rec_info['id'].values:
+                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
+                # we only want units that are in the specified group
+                if unit_info['group'] == group:
+
+                    # and that are within the specified depth range
+                    if min_depth is not None:
+                        if probe_depth - unit_info['depth'] < min_depth:
+                            continue
+                    if max_depth is not None:
+                        if probe_depth - unit_info['depth'] > max_depth:
+                            continue
+
+                    # get the waveforms from only the best channel
+                    spike_ids = model.get_cluster_spikes(unit)
+                    best_chan = model.get_cluster_channels(unit)[0]
+                    u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+                    rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+
+            waveforms.append(pd.concat(rec_forms, axis=1))
+
+        df = pd.concat(
+            waveforms,
+            axis=1,
+            keys=range(len(self.files)),
+            names=['rec_num', 'unit', 'spike']
+        )
+
+        # convert indexes to ms
+        rate = 1000 / int(self.spike_meta[rec_num]['imSampRate'])
+        df.index = df.index * rate
+
+        return df

@@ -176,3 +176,15 @@ class Experiment:
             names=["session"]
         )
         return df
+
+    def get_spike_waveforms(self, group='good', min_depth=0, max_depth=None):
+        waveforms = [
+            s.get_spike_waveforms(group, min_depth, max_depth) for s in self.sessions
+        ]
+
+        df = pd.concat(
+            waveforms, axis=1, copy=False,
+            keys=range(len(waveforms)),
+            names=["session"]
+        )
+        return df
