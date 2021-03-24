@@ -734,7 +734,7 @@ class Behaviour(ABC):
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
 
         if data in ("spike_times", "spike_rate"):
-            print(f"Aligning spike times to trials.")
+            print(f"Aligning {data} to trials.")
             # we let a dedicated function handle aligning spike times
             return self._get_aligned_spike_times(
                 label, event, duration, min_depth=min_depth, max_depth=max_depth,
@@ -821,10 +821,11 @@ class Behaviour(ABC):
         widths = []
 
         for rec_num, recording in enumerate(self.files):
-            raise Exception
-            for unit in waveforms[rec_um].columns:
+            for unit in waveforms[rec_num].columns.get_level_values('unit').unique():
                 u_widths = []
-                for spike in waveforms[rec_num][unit]:
+                u_spikes = waveforms[rec_num][unit]
+                for s in u_spikes:
+                    spike = u_spikes[s]
                     trough = np.where(spike.values == min(spike))[0][0]
                     after = spike.values[trough:]
                     width = np.where(after == max(after))[0][0]
@@ -911,5 +912,107 @@ class Behaviour(ABC):
         # convert indexes to ms
         rate = 1000 / int(self.spike_meta[rec_num]['imSampRate'])
         df.index = df.index * rate
+
+        return df
+
+    @_cacheable
+    def get_aligned_spike_rate_CI(
+        self, label, event, win,
+        bl_label=None, bl_event=None, bl_win=None,
+        ss=20, CI=95, bs=10000,
+        group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None,
+    ):
+        if not isinstance(win, slice):
+            raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
+
+        cluster_info = self.get_cluster_info()
+
+        if min_depth is not None or max_depth is not None:
+            probe_depth = self.get_probe_depth()
+
+        if min_spike_width == 0:
+            min_spike_width = None
+        if min_spike_width is not None or max_spike_width is not None:
+            widths = self.get_spike_widths(
+                group=group, min_depth=min_depth, max_depth=max_depth
+            )
+        else:
+            widths = None
+
+        duration = 2 * max(abs(win.start - 1), abs(win.stop)) / 1000
+        responses = self.align_trials(
+            label, event, 'spike_rate', duration=duration, min_depth=min_depth,
+            max_depth=max_depth, min_spike_width=min_spike_width,
+            max_spike_width=max_spike_width
+        )
+        series = responses.index.values
+        assert series[0] <= win.start < win.stop <= series[-1]
+        responses = responses[win].mean()
+
+        if bl_win is not None:
+            if not isinstance(bl_win, slice):
+                raise PixelsError("bl_win arg for get_aligned_spike_rate_CI should be a slice object")
+            duration = 2 * max(abs(bl_win.start - 1), abs(bl_win.stop)) / 1000
+            label = label if bl_label is None else bl_label
+            event = event if bl_event is None else bl_event
+            baselines = self.align_trials(
+                label, event, 'spike_rate', duration=duration,
+                min_depth=min_depth, max_depth=max_depth,
+                min_spike_width=min_spike_width, max_spike_width=max_spike_width
+            )
+            series = baselines.index.values
+            assert series[0] <= bl_win.start < bl_win.stop <= series[-1]
+            responses = responses - baselines[bl_win].mean()
+
+        lower = (100 - CI) / 2
+        upper = 100 - lower
+
+        cis = []
+
+        for rec_num, recording in enumerate(self.files):
+            rec_info = cluster_info[rec_num]
+            rec_cis = {}
+
+            if widths is not None:
+                rec_widths = widths[widths['rec_num'] == rec_num]
+
+            for unit in rec_info['id'].values:
+                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
+                # we only want units that are in the specified group
+                if unit_info['group'] == group:
+
+                    # and that are within the specified depth range
+                    if min_depth is not None:
+                        if probe_depth - unit_info['depth'] < min_depth:
+                            continue
+                    if max_depth is not None:
+                        if probe_depth - unit_info['depth'] > max_depth:
+                            continue
+
+                    # and that have the specified median spike widths
+                    if widths is not None:
+                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
+                        assert len(width.values) == 1
+                        if min_spike_width is not None:
+                            if width.values[0] < min_spike_width:
+                                continue
+                        if max_spike_width is not None:
+                            if width.values[0] > max_spike_width:
+                                continue
+
+                    u_resps = responses[unit]
+                    samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
+                    medians = np.median(samples, axis=1)
+                    results = np.percentile(medians, [lower, 50, upper])
+                    rec_cis[unit] = results
+
+            cis.append(pd.DataFrame(rec_cis, index=[lower, 50, upper]))
+
+        df = pd.concat(
+            cis,
+            axis=1,
+            keys=range(len(self.files)),
+            names=['rec_num', 'unit']
+        )
 
         return df

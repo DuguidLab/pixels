@@ -205,3 +205,15 @@ class Experiment:
             names=["session"]
         )
         return df
+
+    def get_aligned_spike_rate_CI(self, *args, **kwargs):
+        CIs = [
+            s.get_aligned_spike_rate_CI(*args, **kwargs) for s in self.sessions
+        ]
+
+        df = pd.concat(
+            CIs, axis=1, copy=False,
+            keys=range(len(CIs)),
+            names=["session"]
+        )
+        return df
