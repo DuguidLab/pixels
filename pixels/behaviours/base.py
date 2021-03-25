@@ -103,6 +103,7 @@ class Behaviour(ABC):
         self._behavioural_data = [None] * len(self.files)
         self._spike_data = [None] * len(self.files)
         self._spike_times_data = [None] * len(self.files)
+        self._spike_rate_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
         self._load_lag()
 
@@ -348,6 +349,34 @@ class Behaviour(ABC):
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 
+    def generate_spike_rates(self):
+        """
+        Generate spike rate kernel density estimates from spike times.
+        """
+        spike_times = self._get_spike_times()
+
+        for rec_num, recording in enumerate(self.files):
+            print(f">>>>> Generating spike rate KDEs: recording {rec_num + 1} of {len(self.files)}")
+
+            output = self.interim / recording['spike_rate_processed']
+            if output.exists():
+                continue
+
+            orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+            times = spike_times[rec_num] / orig_rate
+
+            duration = round(times.max().max())
+            x_eval = np.arange(0, duration, 0.001)
+            x = np.zeros((len(times.columns), duration * 1000))
+            rec_rates = {}
+
+            for i, unit in enumerate(times.columns):
+                kde = scipy.stats.gaussian_kde(times[unit].dropna(), bw_method=0.01)
+                rec_rates[unit] = kde(x_eval) * len(times[unit])
+
+            as_df = pd.DataFrame(rec_rates)
+            ioutils.write_hdf5(output, as_df)
+
     def sort_spikes(self):
         """
         Run kilosort spike sorting on raw spike data.
@@ -511,9 +540,14 @@ class Behaviour(ABC):
                 times = np.squeeze(times)
                 clust = np.squeeze(clust)
                 by_clust = {}
+
+                lag_start, _ = self._lag[rec_num]
+                if lag_start < 0:
+                    times += lag_start
+
                 for c in np.unique(clust):
                     by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
-                saved[rec_num]  = pd.DataFrame(by_clust)
+                saved[rec_num]  = pd.concat(by_clust, axis=1, names=['unit'])
         return saved
 
     def _get_aligned_spike_times(
@@ -525,10 +559,64 @@ class Behaviour(ABC):
         align_trials delegates to this function, and should be used for getting aligned
         data in scripts.
         """
-        all_times = self._get_spike_times()
         action_labels = self.get_action_labels()
+        scan_duration = self.sample_rate * 5
+        half = (self.sample_rate * duration) // 2
+        selected_units = self.filter_units(
+            group, min_depth, max_depth, min_spike_width, max_spike_width
+        )
         trials = []
+
+        if kde:
+            spikes = self.get_spike_rate_data()
+        else:
+            spikes = self._get_spike_times()
+
+        for rec_num in range(len(self.files)):
+            actions = action_labels[rec_num][:, 0]
+            events = action_labels[rec_num][:, 1]
+            trial_starts = np.where((actions == label))[0]
+
+            f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
+            rec_spikes = spikes[rec_num] / f
+            rec_spikes = rec_spikes[selected_units[rec_num]]
+            rec_trials = []
+
+            for i, start in enumerate(trial_starts):
+                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
+                if kde:
+                    trial = rec_spikes[centre - half + 1:centre + half + 1]
+                else:
+                    trial = rec_spikes[centre - half < rec_spikes]
+                    trial = trial[trial <= centre + half]
+                    trial = trial - centre
+                tdf = []
+
+                for unit in trial:
+                    u_times = trial[unit].values
+                    u_times = u_times[~np.isnan(u_times)]
+                    u_times = np.unique(u_times)  # remove double-counted spikes
+                    udf = pd.DataFrame({int(unit): u_times})
+                    tdf.append(udf)
+                if tdf:
+                    rec_trials.append(pd.concat(tdf, axis=1))
+
+            rec_trials = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
+            trials.append(rec_trials)
+
+        trials = pd.concat(trials, axis=1, keys=range(len(trials)), names=["rec_num", "trial", "unit"])
+        trials = trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
+        trials = trials.sort_index(level=0, axis=1)
+        return trials
+
+    def filter_units(
+        self, group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None
+    ):
+        """
+        Select units based on specified criteria.
+        """
         cluster_info = self.get_cluster_info()
+        selected_units = []
 
         if min_depth is not None or max_depth is not None:
             probe_depth = self.get_probe_depth()
@@ -543,105 +631,40 @@ class Behaviour(ABC):
             widths = None
 
         for rec_num in range(len(self.files)):
-            try:
-                times = np.load(self.processed / f'sorted_{rec_num}' / 'spike_times.npy')
-                clust = np.load(self.processed / f'sorted_{rec_num}' / 'spike_clusters.npy')
-            except FileNotFoundError:
-                msg = ": Can't load spike times that haven't been extracted!"
-                raise PixelsError(self.name + msg)
-
-            orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
-            f = orig_rate / self.sample_rate
-            scan_duration = orig_rate * 5
-            full = orig_rate * duration
-            half = full // 2
-            if kde:
-                x_eval = np.arange(- full / f, full / f) + 1
-                x_eval /= 1000  # to seconds
-                out_index = np.arange(- half / f, half / f) + 1
-
-            times = times.squeeze()
-            clust = clust.squeeze()
-            df = pd.DataFrame(np.vstack((times, clust)).T)
             rec_info = cluster_info[rec_num]
-            units = np.unique(clust)
-
-            actions = action_labels[rec_num][:, 0]
-            events = action_labels[rec_num][:, 1]
-            trial_starts = np.where((actions == label))[0]
+            rec_units = []
 
             if widths is not None:
                 rec_widths = widths[widths['rec_num'] == rec_num]
 
-            for i, start in enumerate(trial_starts):
-                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
-                centre = int(centre * f - f / 2)
-                span = full if kde else half
-                trial = df.loc[centre - span < df[0]]
-                trial = trial.loc[trial[0] <= centre + span]
-                trial[0] -= centre
-                tdf = []
+            for unit in rec_info['id']:
+                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
 
-                for unit in units:
-                    unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
-                    # we only want units that are in the specified group
-                    if unit_info['group'] == group:
+                # we only want units that are in the specified group
+                if not group or unit_info['group'] == group:
 
-                        # and that are within the specified depth range
-                        if min_depth is not None:
-                            if probe_depth - unit_info['depth'] < min_depth:
+                    # and that are within the specified depth range
+                    if min_depth is not None:
+                        if probe_depth - unit_info['depth'] < min_depth:
+                            continue
+                    if max_depth is not None:
+                        if probe_depth - unit_info['depth'] > max_depth:
+                            continue
+
+                    # and that have the specified median spike widths
+                    if widths is not None:
+                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
+                        assert len(width.values) == 1
+                        if min_spike_width is not None:
+                            if width.values[0] < min_spike_width:
                                 continue
-                        if max_depth is not None:
-                            if probe_depth - unit_info['depth'] > max_depth:
+                        if max_spike_width is not None:
+                            if width.values[0] > max_spike_width:
                                 continue
 
-                        # and that have the specified median spike widths
-                        if widths is not None:
-                            width = rec_widths[rec_widths['unit'] == unit]['median_ms']
-                            assert len(width.values) == 1
-                            if min_spike_width is not None:
-                                if width.values[0] < min_spike_width:
-                                    continue
-                            if max_spike_width is not None:
-                                if width.values[0] > max_spike_width:
-                                    continue
-
-                        uspikes = trial.loc[trial[1] == unit][0].values
-                        # remove double-counted spikes
-                        uspikes = np.unique(uspikes)
-                        # should be in seconds
-                        uspikes = uspikes / 1000
-
-                        if kde:
-                            if uspikes.size == 0:
-                                # no spikes, just give it a string of zeros
-                                uspikes = np.zeros(x_eval.shape)
-                            else:
-                                if uspikes.size == 1:
-                                    # ugly hack to avoid gaussian_kde from complaining about
-                                    # needing multiple values. This shouldn't(TM) affect
-                                    # the final result as the value is later cut off by
-                                    # some distance.
-                                    uspikes = np.insert(uspikes, 0, 0)
-                                kern = scipy.stats.gaussian_kde(
-                                    uspikes / f, bw_method=0.01 * duration
-                                )
-                                uspikes = kern(x_eval) * len(uspikes)
-                            uspikes = uspikes[int(half / f):int(- half / f)]
-                            udf = pd.DataFrame({int(unit): uspikes})
-                            udf.set_index(out_index, inplace=True)
-                        else:
-                            udf = pd.DataFrame({int(unit): uspikes})
-                        tdf.append(udf)
-                if tdf:
-                    trials.append(pd.concat(tdf, axis=1))
-
-        trials = pd.concat(
-            trials, axis=1, keys=range(len(trials)), names=["trial", "unit"]
-        )
-        trials = trials.reorder_levels(["unit", "trial"], axis=1)
-        trials = trials.sort_index(level=0, axis=1)
-        return trials
+                    rec_units.append(unit)
+            selected_units.append(rec_units)
+        return selected_units
 
     def _get_neuro_raw(self, kind):
         raw = []
@@ -792,7 +815,6 @@ class Behaviour(ABC):
         timepoints = np.linspace(start, duration / 2, points)
         trials['time'] = pd.Series(timepoints, index=trials.index)
         trials = trials.set_index('time')
-
         return trials
 
     def get_cluster_info(self):
@@ -815,6 +837,7 @@ class Behaviour(ABC):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
+        print("Calculating spike widths")
         waveforms = self.get_spike_waveforms(
             group=group, min_depth=min_depth, max_depth=max_depth
         )
@@ -846,60 +869,23 @@ class Behaviour(ABC):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
-        if min_depth is not None or max_depth is not None:
-            probe_depth = self.get_probe_depth()
+        selected_units = self.filter_units(
+            group, min_depth, max_depth, min_spike_width, max_spike_width
+        )
 
-        if min_spike_width == 0:
-            min_spike_width = None
-        if min_spike_width is not None or max_spike_width is not None:
-            widths = self.get_spike_widths(
-                group=group, min_depth=min_depth, max_depth=max_depth
-            )
-        else:
-            widths = None
-
-        cluster_info = self.get_cluster_info()
         waveforms = []
 
         for rec_num, recording in enumerate(self.files):
             paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
             model = load_model(paramspy)
-            rec_info = cluster_info[rec_num]
             rec_forms = {}
 
-            if widths is not None:
-                rec_widths = widths[widths['rec_num'] == rec_num]
-
-            for unit in rec_info['id'].values:
-                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
-                # we only want units that are in the specified group
-                if unit_info['group'] == group:
-
-                    # and that are within the specified depth range
-                    if min_depth is not None:
-                        if probe_depth - unit_info['depth'] < min_depth:
-                            continue
-                    if max_depth is not None:
-                        if probe_depth - unit_info['depth'] > max_depth:
-                            continue
-
-                    # and that have the specified median spike widths
-                    if widths is not None:
-                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
-                        assert len(width.values) == 1
-                        if min_spike_width is not None:
-                            if width.values[0] < min_spike_width:
-                                continue
-                        if max_spike_width is not None:
-                            if width.values[0] > max_spike_width:
-                                continue
-
-                    # get the waveforms from only the best channel
-                    spike_ids = model.get_cluster_spikes(unit)
-                    best_chan = model.get_cluster_channels(unit)[0]
-                    u_waveforms = model.get_waveforms(spike_ids, [best_chan])
-                    rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
-
+            for unit in selected_units[rec_num]:
+                # get the waveforms from only the best channel
+                spike_ids = model.get_cluster_spikes(unit)
+                best_chan = model.get_cluster_channels(unit)[0]
+                u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+                rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
             waveforms.append(pd.concat(rec_forms, axis=1))
 
         df = pd.concat(
@@ -908,11 +894,9 @@ class Behaviour(ABC):
             keys=range(len(self.files)),
             names=['rec_num', 'unit', 'spike']
         )
-
         # convert indexes to ms
         rate = 1000 / int(self.spike_meta[rec_num]['imSampRate'])
         df.index = df.index * rate
-
         return df
 
     @_cacheable
@@ -925,19 +909,9 @@ class Behaviour(ABC):
         if not isinstance(win, slice):
             raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
 
-        cluster_info = self.get_cluster_info()
-
-        if min_depth is not None or max_depth is not None:
-            probe_depth = self.get_probe_depth()
-
-        if min_spike_width == 0:
-            min_spike_width = None
-        if min_spike_width is not None or max_spike_width is not None:
-            widths = self.get_spike_widths(
-                group=group, min_depth=min_depth, max_depth=max_depth
-            )
-        else:
-            widths = None
+        selected_units = self.filter_units(
+            group, min_depth, max_depth, min_spike_width, max_spike_width
+        )
 
         duration = 2 * max(abs(win.start - 1), abs(win.stop)) / 1000
         responses = self.align_trials(
@@ -966,46 +940,16 @@ class Behaviour(ABC):
 
         lower = (100 - CI) / 2
         upper = 100 - lower
-
         cis = []
 
         for rec_num, recording in enumerate(self.files):
-            rec_info = cluster_info[rec_num]
             rec_cis = {}
-
-            if widths is not None:
-                rec_widths = widths[widths['rec_num'] == rec_num]
-
-            for unit in rec_info['id'].values:
-                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
-                # we only want units that are in the specified group
-                if unit_info['group'] == group:
-
-                    # and that are within the specified depth range
-                    if min_depth is not None:
-                        if probe_depth - unit_info['depth'] < min_depth:
-                            continue
-                    if max_depth is not None:
-                        if probe_depth - unit_info['depth'] > max_depth:
-                            continue
-
-                    # and that have the specified median spike widths
-                    if widths is not None:
-                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
-                        assert len(width.values) == 1
-                        if min_spike_width is not None:
-                            if width.values[0] < min_spike_width:
-                                continue
-                        if max_spike_width is not None:
-                            if width.values[0] > max_spike_width:
-                                continue
-
-                    u_resps = responses[unit]
-                    samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
-                    medians = np.median(samples, axis=1)
-                    results = np.percentile(medians, [lower, 50, upper])
-                    rec_cis[unit] = results
-
+            for unit in selected_units:
+                u_resps = responses[unit]
+                samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
+                medians = np.median(samples, axis=1)
+                results = np.percentile(medians, [lower, 50, upper])
+                rec_cis[unit] = results
             cis.append(pd.DataFrame(rec_cis, index=[lower, 50, upper]))
 
         df = pd.concat(
@@ -1014,5 +958,4 @@ class Behaviour(ABC):
             keys=range(len(self.files)),
             names=['rec_num', 'unit']
         )
-
         return df

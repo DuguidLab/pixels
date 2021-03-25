@@ -101,6 +101,15 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.sort_spikes()
 
+    def generate_spike_rates(self):
+        """
+        Generate spike rate kernel density estimates from spike times.
+        """
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Generating spike rates for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
+            session.generate_spike_rates()
+
     def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data for all sessions.

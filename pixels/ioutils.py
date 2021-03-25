@@ -89,6 +89,7 @@ def get_data_files(data_dir, session_name):
         recording['spike_processed'] = recording['spike_data'].with_name(
             recording['spike_data'].stem + '_processed.h5'
         )
+        recording['spike_rate_processed'] = Path(f'spike_rate_{num}.h5')
         recording['lfp_processed'] = recording['lfp_data'].with_name(
             recording['lfp_data'].stem + '_processed.h5'
         )
