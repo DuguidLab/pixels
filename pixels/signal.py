@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import scipy.signal
+import scipy.stats
 
 from pixels import PixelsError
 
@@ -212,3 +213,26 @@ def median_subtraction(array, axis):
     #    array[:, i] = array[:, i] - np.median(array[:, i], axis=axis)
 
     return array
+
+
+def gen_kde(times, x_eval, bw_method=0.0002):
+    """
+    Generate a KDE from a set of timepoints (i.e. spike times) and fit to a set of x
+    values.
+
+    Parameters
+    -------
+    times : 1D numpy array
+        Set of times to use for KDE.
+
+    x_eval : 1D numpy array
+        Set of x values to fit to KDE to create returned vector.
+
+    """
+    times = times[~np.isnan(times)]
+
+    if len(times) < 2:  # don't even bother with these ones
+        return np.zeros(x_eval.shape)
+
+    kde = scipy.stats.gaussian_kde(times, bw_method=bw_method)
+    return kde(x_eval) * len(times)

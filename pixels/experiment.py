@@ -167,7 +167,7 @@ class Experiment:
         df = pd.concat(
             trials, axis=1, copy=False,
             keys=range(len(trials)),
-            names=["session", "unit", "trial"]
+            names=["session", "rec_num", "unit", "trial"]
         )
         return df
 

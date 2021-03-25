@@ -6,6 +6,7 @@ base for defining behaviour-specific processing.
 
 import functools
 import json
+import multiprocessing as mp
 import tarfile
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -358,21 +359,26 @@ class Behaviour(ABC):
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Generating spike rate KDEs: recording {rec_num + 1} of {len(self.files)}")
 
-            output = self.interim / recording['spike_rate_processed']
+            output = self.processed / recording['spike_rate_processed']
             if output.exists():
                 continue
 
             orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
             times = spike_times[rec_num] / orig_rate
 
-            duration = round(times.max().max())
+            duration = int(np.ceil(times.max().max()))
             x_eval = np.arange(0, duration, 0.001)
             x = np.zeros((len(times.columns), duration * 1000))
-            rec_rates = {}
 
-            for i, unit in enumerate(times.columns):
-                kde = scipy.stats.gaussian_kde(times[unit].dropna(), bw_method=0.01)
-                rec_rates[unit] = kde(x_eval) * len(times[unit])
+            # I parallelised this because it otherwise takes many hours
+            with mp.Pool(mp.cpu_count() // 2) as pool:
+                results = pool.starmap(
+                    signal.gen_kde, zip(times.values.T, [x_eval] * len(times)),
+                )
+
+            rec_rates = {}
+            for i, unit in enumerate(times):
+                rec_rates[unit] = results[i]
 
             as_df = pd.DataFrame(rec_rates)
             ioutils.write_hdf5(output, as_df)
@@ -486,6 +492,7 @@ class Behaviour(ABC):
                         saved[rec_num] = ioutils.read_hdf5(file_path)
                 else:
                     msg = f"Could not find {attr[1:]} for recording {rec_num}."
+                    msg += f"\nFile should be at: {file_path}"
                     raise PixelsError(msg)
         return saved
 
@@ -561,7 +568,7 @@ class Behaviour(ABC):
         """
         action_labels = self.get_action_labels()
         scan_duration = self.sample_rate * 5
-        half = (self.sample_rate * duration) // 2
+        half = int((self.sample_rate * duration) / 2)
         selected_units = self.filter_units(
             group, min_depth, max_depth, min_spike_width, max_spike_width
         )
@@ -584,22 +591,25 @@ class Behaviour(ABC):
 
             for i, start in enumerate(trial_starts):
                 centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
+
                 if kde:
-                    trial = rec_spikes[centre - half + 1:centre + half + 1]
+                    trial = rec_spikes.iloc[centre - half + 1:centre + half + 1]
+                    trial.index = trial.index - centre
+                    rec_trials.append(trial)
                 else:
                     trial = rec_spikes[centre - half < rec_spikes]
                     trial = trial[trial <= centre + half]
                     trial = trial - centre
-                tdf = []
+                    tdf = []
 
-                for unit in trial:
-                    u_times = trial[unit].values
-                    u_times = u_times[~np.isnan(u_times)]
-                    u_times = np.unique(u_times)  # remove double-counted spikes
-                    udf = pd.DataFrame({int(unit): u_times})
-                    tdf.append(udf)
-                if tdf:
-                    rec_trials.append(pd.concat(tdf, axis=1))
+                    for unit in trial:
+                        u_times = trial[unit].values
+                        u_times = u_times[~np.isnan(u_times)]
+                        u_times = np.unique(u_times)  # remove double-counted spikes
+                        udf = pd.DataFrame({int(unit): u_times})
+                        tdf.append(udf)
+                    if tdf:
+                        rec_trials.append(pd.concat(tdf, axis=1))
 
             rec_trials = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
             trials.append(rec_trials)
@@ -921,7 +931,7 @@ class Behaviour(ABC):
         )
         series = responses.index.values
         assert series[0] <= win.start < win.stop <= series[-1]
-        responses = responses[win].mean()
+        responses = responses.loc[win].mean()
 
         if bl_win is not None:
             if not isinstance(bl_win, slice):
@@ -936,7 +946,7 @@ class Behaviour(ABC):
             )
             series = baselines.index.values
             assert series[0] <= bl_win.start < bl_win.stop <= series[-1]
-            responses = responses - baselines[bl_win].mean()
+            responses = responses - baselines.loc[bl_win].mean()
 
         lower = (100 - CI) / 2
         upper = 100 - lower
@@ -944,8 +954,8 @@ class Behaviour(ABC):
 
         for rec_num, recording in enumerate(self.files):
             rec_cis = {}
-            for unit in selected_units:
-                u_resps = responses[unit]
+            for unit in selected_units[rec_num]:
+                u_resps = responses[rec_num][unit]
                 samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
                 medians = np.median(samples, axis=1)
                 results = np.percentile(medians, [lower, 50, upper])
