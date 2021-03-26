@@ -590,7 +590,10 @@ class Behaviour(ABC):
             rec_trials = []
 
             for i, start in enumerate(trial_starts):
-                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
+                centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
+                if len(centre) == 0:
+                    raise PixelsError('Action labels probably miscalculated')
+                centre = start + centre[0]
 
                 if kde:
                     trial = rec_spikes.iloc[centre - half + 1:centre + half + 1]
@@ -962,10 +965,5 @@ class Behaviour(ABC):
                 rec_cis[unit] = results
             cis.append(pd.DataFrame(rec_cis, index=[lower, 50, upper]))
 
-        df = pd.concat(
-            cis,
-            axis=1,
-            keys=range(len(self.files)),
-            names=['rec_num', 'unit']
-        )
+        df = pd.concat(cis, axis=1, keys=range(len(self.files)), names=['rec_num', 'unit'])
         return df

@@ -76,7 +76,7 @@ class LeverPush(Behaviour):
             opto = False
 
         behavioural_data = signal.binarise(behavioural_data)
-        action_labels = np.zeros((len(behavioural_data), 2))
+        action_labels = np.zeros((len(behavioural_data), 2), dtype=np.int16)
 
         back_sensor_signal = behavioural_data["/'Back_Sensor'/'0'"].values
         back_sensor_onsets = np.where(
@@ -85,8 +85,8 @@ class LeverPush(Behaviour):
         back_sensor_offsets = np.where(
             (back_sensor_signal[:-1] == 1) & (back_sensor_signal[1:] == 0)
         )[0]
-        action_labels[back_sensor_onsets, 1] = Events.back_sensor_open
-        action_labels[back_sensor_offsets, 1] = Events.back_sensor_closed
+        action_labels[back_sensor_onsets, 1] += Events.back_sensor_open
+        action_labels[back_sensor_offsets, 1] += Events.back_sensor_closed
 
         front_sensor_signal = behavioural_data["/'Front_Sensor'/'0'"].values
         front_sensor_onsets = np.where(
@@ -95,24 +95,24 @@ class LeverPush(Behaviour):
         front_sensor_offsets = np.where(
             (front_sensor_signal[:-1] == 1) & (front_sensor_signal[1:] == 0)
         )[0]
-        action_labels[front_sensor_onsets, 1] = Events.front_sensor_open
-        action_labels[front_sensor_offsets, 1] = Events.front_sensor_closed
+        action_labels[front_sensor_onsets, 1] += Events.front_sensor_open
+        action_labels[front_sensor_offsets, 1] += Events.front_sensor_closed
 
         reset_signal = behavioural_data["/'Reset_Signal'/'0'"].values
         reset_onsets = np.where((reset_signal[:-1] == 0) & (reset_signal[1:] == 1))[0]
-        action_labels[reset_onsets, 1] = Events.reset_signal
+        action_labels[reset_onsets, 1] += Events.reset_signal
 
         reward_signal = behavioural_data["/'Reward_Signal'/'0'"].values
         reward_onsets = np.where(
             (reward_signal[:-1] == 0) & (reward_signal[1:] == 1)
         )[0]
-        action_labels[reward_onsets, 1] = Events.reward_signal
+        action_labels[reward_onsets, 1] += Events.reward_signal
 
         tone_signal = behavioural_data["/'Tone_Signal'/'0'"].values
         tone_onsets = np.where((tone_signal[:-1] == 0) & (tone_signal[1:] == 1))[0]
         tone_offsets = np.where((tone_signal[:-1] == 1) & (tone_signal[1:] == 0))[0]
-        action_labels[tone_onsets, 1] = Events.tone_onset
-        action_labels[tone_offsets, 1] = Events.tone_offset
+        action_labels[tone_onsets, 1] += Events.tone_onset
+        action_labels[tone_offsets, 1] += Events.tone_offset
 
         if len(behavioural_data.columns) == 8:
             opto = True
@@ -136,14 +136,14 @@ class LeverPush(Behaviour):
                 if last == i or offsets[i + 1] - offset > 200:
                     shutter_offsets.append(offset)
             shutter_offsets = np.array(shutter_offsets)
-            action_labels[shutter_onsets, 1] = Events.shutter_onset
-            action_labels[shutter_offsets, 1] = Events.shutter_offset
+            action_labels[shutter_onsets, 1] += Events.shutter_onset
+            action_labels[shutter_offsets, 1] += Events.shutter_offset
 
             laser_signal = behavioural_data["/'Laser_Signal'/'0'"].values
             laser_onsets = np.where((laser_signal[:-1] == 0) & (laser_signal[1:] == 1))[0]
             laser_offsets = np.where((laser_signal[:-1] == 1) & (laser_signal[1:] == 0))[0]
-            action_labels[laser_onsets, 1] = Events.laser_onset
-            action_labels[laser_offsets, 1] = Events.laser_offset
+            action_labels[laser_onsets, 1] += Events.laser_onset
+            action_labels[laser_offsets, 1] += Events.laser_offset
 
             for shutter in shutter_onsets:
                 # if a tone came on at roughly the same time, it is cued
@@ -157,8 +157,6 @@ class LeverPush(Behaviour):
                 laser = (laser_onsets < shutter + 500) * (laser_onsets > shutter - 500)
                 if laser.any():
                     shutter = min(laser_onsets[laser][0], shutter)  # must be earliest event
-                # if the next back sensor open happens after the shutter ends, there was no push
-                offset = np.delete(shutter_offsets, (shutter_offsets <= shutter))[0]
                 back_sensor_open = np.delete(back_sensor_onsets, (back_sensor_onsets <= shutter))
                 if not back_sensor_open.size:
                     # is it the end of the session?
@@ -168,6 +166,8 @@ class LeverPush(Behaviour):
                         break
                     nopush = True
                 else:
+                    # if the next back sensor open happens after the shutter ends, there was no push
+                    offset = np.delete(shutter_offsets, (shutter_offsets <= shutter))[0]
                     back_sensor_open = back_sensor_open[0]
                     nopush = back_sensor_open > offset
                 if nopush:
@@ -199,7 +199,7 @@ class LeverPush(Behaviour):
                             action += "push_partial"
                         else:
                             action += "push_full"
-                action_labels[shutter, 0] = getattr(ActionLabels, action)
+                action_labels[shutter, 0] += getattr(ActionLabels, action)
 
             for laser in laser_onsets:
                 # if a tone came on at roughly the same time, it is cued
@@ -213,8 +213,6 @@ class LeverPush(Behaviour):
                 shutter = (shutter_onsets < laser + 500) * (shutter_onsets > laser - 500)
                 if shutter.any():
                     laser = min(shutter_onsets[shutter][0], laser)  # must be earliest event
-                # if the next back sensor open happens after the laser ends, there was no push
-                offset = np.delete(laser_offsets, (laser_offsets <= laser))[0]
                 back_sensor_open = np.delete(back_sensor_onsets, (back_sensor_onsets <= laser))
                 if not back_sensor_open.size:
                     # is it the end of the session?
@@ -224,7 +222,9 @@ class LeverPush(Behaviour):
                         break
                     nopush = True
                 else:
+                    # if the next back sensor open happens after the laser ends, there was no push
                     back_sensor_open = back_sensor_open[0]
+                    offset = np.delete(laser_offsets, (laser_offsets <= laser))[0]
                     nopush = back_sensor_open > offset
                 if nopush:
                     action += "nopush"
@@ -255,23 +255,23 @@ class LeverPush(Behaviour):
                             action += "push_partial"
                         else:
                             action += "push_full"
-                action_labels[laser, 0] = getattr(ActionLabels, action)
+                action_labels[laser, 0] += getattr(ActionLabels, action)
 
         else:
             for reward in reward_onsets:
                 previous_tone = tone_onsets[np.where(reward - tone_onsets >= 0)[0]]
                 if previous_tone.size:
-                    action_labels[previous_tone[-1], 0] = ActionLabels.rewarded_push
+                    action_labels[previous_tone[-1], 0] += ActionLabels.rewarded_push
 
             for tone in tone_onsets:
                 if not action_labels[tone, 0]:
-                    action_labels[tone, 0] = ActionLabels.missed_tone
+                    action_labels[tone, 0] += ActionLabels.missed_tone
 
             for push in back_sensor_onsets:
                 previous_tone = tone_onsets[np.where(push - tone_onsets >= 0)[0]]
 
                 if not previous_tone.size:
-                    action_labels[push, 0] = ActionLabels.uncued_push
+                    action_labels[push, 0] += ActionLabels.uncued_push
                     continue  # no tones yet, must be uncued
 
                 previous_reset = reset_onsets[np.where(push - reset_onsets >= 0)[0]]
@@ -280,7 +280,7 @@ class LeverPush(Behaviour):
 
                 if previous_reset[-1] < previous_tone[-1]:
                     continue  # must be within trial
-                action_labels[push, 0] = ActionLabels.uncued_push
+                action_labels[push, 0] += ActionLabels.uncued_push
 
         if plot:
             plt.clf()
