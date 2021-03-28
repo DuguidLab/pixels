@@ -359,16 +359,11 @@ class Behaviour(ABC):
         for rec_num, recording in enumerate(self.files):
             print(f">>>>> Generating spike rate KDEs: recording {rec_num + 1} of {len(self.files)}")
 
-            output = self.processed / recording['spike_rate_processed']
-            if output.exists():
-                continue
-
             orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+            # these are all in seconds
             times = spike_times[rec_num] / orig_rate
-
             duration = int(np.ceil(times.max().max()))
             x_eval = np.arange(0, duration, 0.001)
-            x = np.zeros((len(times.columns), duration * 1000))
 
             # I parallelised this because it otherwise takes many hours
             with mp.Pool(mp.cpu_count() // 2) as pool:
@@ -380,7 +375,9 @@ class Behaviour(ABC):
             for i, unit in enumerate(times):
                 rec_rates[unit] = results[i]
 
+            output = self.processed / recording['spike_rate_processed']
             as_df = pd.DataFrame(rec_rates)
+            as_df.index = as_df.index / 1000  # to seconds from points
             ioutils.write_hdf5(output, as_df)
 
     def sort_spikes(self):
@@ -584,8 +581,7 @@ class Behaviour(ABC):
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
 
-            f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
-            rec_spikes = spikes[rec_num] / f
+            rec_spikes = spikes[rec_num]
             rec_spikes = rec_spikes[selected_units[rec_num]]
             rec_trials = []
 
