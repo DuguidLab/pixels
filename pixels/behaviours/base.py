@@ -890,6 +890,8 @@ class Behaviour(ABC):
 
         for rec_num, recording in enumerate(self.files):
             paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
+            if not paramspy.exists():
+                raise PixelsError(f"{self.name}: params.py not found")
             model = load_model(paramspy)
             rec_forms = {}
 
@@ -898,6 +900,8 @@ class Behaviour(ABC):
                 spike_ids = model.get_cluster_spikes(unit)
                 best_chan = model.get_cluster_channels(unit)[0]
                 u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+                if u_waveforms is None:
+                    raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
                 rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
             waveforms.append(pd.concat(rec_forms, axis=1))
 
