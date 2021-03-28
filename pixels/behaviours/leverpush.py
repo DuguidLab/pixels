@@ -199,7 +199,7 @@ class LeverPush(Behaviour):
                             action += "push_partial"
                         else:
                             action += "push_full"
-                action_labels[shutter, 0] += getattr(ActionLabels, action)
+                action_labels[shutter, 0] = getattr(ActionLabels, action)
 
             for laser in laser_onsets:
                 # if a tone came on at roughly the same time, it is cued
@@ -255,23 +255,23 @@ class LeverPush(Behaviour):
                             action += "push_partial"
                         else:
                             action += "push_full"
-                action_labels[laser, 0] += getattr(ActionLabels, action)
+                action_labels[laser, 0] = getattr(ActionLabels, action)
 
         else:
             for reward in reward_onsets:
                 previous_tone = tone_onsets[np.where(reward - tone_onsets >= 0)[0]]
                 if previous_tone.size:
-                    action_labels[previous_tone[-1], 0] += ActionLabels.rewarded_push
+                    action_labels[previous_tone[-1], 0] = ActionLabels.rewarded_push
 
             for tone in tone_onsets:
                 if not action_labels[tone, 0]:
-                    action_labels[tone, 0] += ActionLabels.missed_tone
+                    action_labels[tone, 0] = ActionLabels.missed_tone
 
             for push in back_sensor_onsets:
                 previous_tone = tone_onsets[np.where(push - tone_onsets >= 0)[0]]
 
                 if not previous_tone.size:
-                    action_labels[push, 0] += ActionLabels.uncued_push
+                    action_labels[push, 0] = ActionLabels.uncued_push
                     continue  # no tones yet, must be uncued
 
                 previous_reset = reset_onsets[np.where(push - reset_onsets >= 0)[0]]
@@ -280,7 +280,7 @@ class LeverPush(Behaviour):
 
                 if previous_reset[-1] < previous_tone[-1]:
                     continue  # must be within trial
-                action_labels[push, 0] += ActionLabels.uncued_push
+                action_labels[push, 0] = ActionLabels.uncued_push
 
         if plot:
             plt.clf()
