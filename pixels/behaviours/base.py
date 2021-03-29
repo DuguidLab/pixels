@@ -377,7 +377,6 @@ class Behaviour(ABC):
 
             output = self.processed / recording['spike_rate_processed']
             as_df = pd.DataFrame(rec_rates)
-            as_df.index = as_df.index / 1000  # to seconds from points
             ioutils.write_hdf5(output, as_df)
 
     def sort_spikes(self):
