@@ -609,8 +609,8 @@ class Behaviour(ABC):
                     if tdf:
                         rec_trials.append(pd.concat(tdf, axis=1))
 
-            rec_trials = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
-            trials.append(rec_trials)
+            rec_df = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
+            trials.append(rec_df)
 
         trials = pd.concat(trials, axis=1, keys=range(len(trials)), names=["rec_num", "trial", "unit"])
         trials = trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
