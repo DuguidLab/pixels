@@ -584,6 +584,10 @@ class Behaviour(ABC):
             rec_spikes = rec_spikes[selected_units[rec_num]]
             rec_trials = []
 
+            if not kde:
+                f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
+                rec_spikes = rec_spikes / f
+
             for i, start in enumerate(trial_starts):
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
                 if len(centre) == 0:
