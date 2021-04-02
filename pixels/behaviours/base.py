@@ -6,7 +6,6 @@ base for defining behaviour-specific processing.
 
 import functools
 import json
-import multiprocessing as mp
 import tarfile
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -357,21 +356,15 @@ class Behaviour(ABC):
         spike_times = self._get_spike_times()
 
         for rec_num, recording in enumerate(self.files):
-            print(f">>>>> Generating spike rate KDEs: recording {rec_num + 1} of {len(self.files)}")
+            print(f">>>>> Generating spike rates: recording {rec_num + 1} of {len(self.files)}")
 
             orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
             # these are all in seconds
             times = spike_times[rec_num] / orig_rate
             duration = int(np.ceil(times.max().max()))
-            x_eval = np.arange(0, duration, 0.001)
-
-            # I parallelised this because it otherwise takes many hours
-            with mp.Pool(mp.cpu_count() // 2) as pool:
-                results = pool.starmap(
-                    signal.gen_kde, zip(times.values.T, [x_eval] * len(times)),
-                )
 
             rec_rates = {}
+            results = signal.convolve(times.values.T, duration)
             for i, unit in enumerate(times):
                 rec_rates[unit] = results[i]
 

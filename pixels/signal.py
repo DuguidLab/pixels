@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import scipy.signal
-import scipy.stats
+from scipy.ndimage import gaussian_filter1d
 
 from pixels import PixelsError
 
@@ -215,24 +215,36 @@ def median_subtraction(array, axis):
     return array
 
 
-def gen_kde(times, x_eval, bw_method=0.0002):
+def convolve(times, duration, sigma=0.050):
     """
-    Generate a KDE from a set of timepoints (i.e. spike times) and fit to a set of x
-    values.
+    Create a continuous signal from a set of spike times in seconds and convolve into a
+    smooth firing rate signal.
 
     Parameters
     -------
-    times : 1D numpy array
-        Set of times to use for KDE.
+    times : 2D numpy array
+        Set of spike times in seconds to use to generate signal. Each row should
+        correspond to one unit's spike times.
 
-    x_eval : 1D numpy array
-        Set of x values to fit to KDE to create returned vector.
+    duration : int
+        Number of seconds of final signal.
+
+    sigma : float/int, optional
+        Time in seconds of sigma of gaussian kernel to use. Default is 50 ms.
 
     """
-    times = times[~np.isnan(times)]
+    # convert to milliseconds (each index is a millisecond)
+    times = times * 1000
+    sigma *= 1000
 
-    if len(times) < 2:  # don't even bother with these ones
-        return np.zeros(x_eval.shape)
+    # turn into array of 0s and 1s
+    times_arr = np.zeros((times.shape[0], duration * 1000))
+    for i, unit in enumerate(times):
+        u_times = unit[~np.isnan(unit)].astype(np.int)
+        times_arr[i, u_times] = 1
 
-    kde = scipy.stats.gaussian_kde(times, bw_method=bw_method)
-    return kde(x_eval) * len(times)
+    # convolve and re-scale so units are per second
+    convolved = gaussian_filter1d(times_arr, sigma)
+    convolved = convolved * 1000
+
+    return convolved

@@ -103,7 +103,7 @@ class Experiment:
 
     def generate_spike_rates(self):
         """
-        Generate spike rate kernel density estimates from spike times.
+        Generate spike rates from spike times.
         """
         for i, session in enumerate(self.sessions):
             print(">>>>> Generating spike rates for session {} ({} / {})"
