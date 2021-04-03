@@ -6,6 +6,7 @@ base for defining behaviour-specific processing.
 
 import functools
 import json
+import os
 import tarfile
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -94,6 +95,9 @@ class Behaviour(ABC):
         self.lfp_meta = [
             ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
         ]
+
+        # environmental variable PIXELS_CACHE={0,1} can be {disable,enable} cache
+        self.set_cache(bool(int(os.environ.get("PIXELS_CACHE", 1))))
 
     def drop_data(self):
         """
