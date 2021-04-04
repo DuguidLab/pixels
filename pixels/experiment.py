@@ -138,22 +138,14 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.process_motion_tracking(config, create_labelled_video)
 
-    def align_trials(
-        self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
-        max_depth=None, min_spike_width=None, max_spike_width=None, sigma=None
-    ):
+    def align_trials(self, *args, **kwargs):
         """
         Get trials aligned to an event. Check behaviours.base.Behaviour.align_trials for
         usage information.
         """
         trials = []
         for session in self.sessions:
-            trials.append(
-                session.align_trials(
-                    label, event, data, raw, duration, min_depth, max_depth,
-                    min_spike_width, max_spike_width, sigma
-                )
-            )
+            trials.append(session.align_trials(*args, **kwargs))
 
         df = pd.concat(
             trials, axis=1, copy=False,
