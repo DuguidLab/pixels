@@ -215,36 +215,41 @@ def median_subtraction(array, axis):
     return array
 
 
-def convolve(times, duration, sigma=0.050):
+def convolve(times, duration, sigma=None):
     """
-    Create a continuous signal from a set of spike times in seconds and convolve into a
-    smooth firing rate signal.
+    Create a continuous signal from a set of spike times in milliseconds and convolve
+    into a smooth firing rate signal.
 
     Parameters
     -------
-    times : 2D numpy array
-        Set of spike times in seconds to use to generate signal. Each row should
+    times : pandas.DataFrame
+        Spike times in milliseconds to use to generate signal. Each column should
         correspond to one unit's spike times.
 
     duration : int
-        Number of seconds of final signal.
+        Number of milliseconds of final signal.
 
     sigma : float/int, optional
-        Time in seconds of sigma of gaussian kernel to use. Default is 50 ms.
+        Time in milliseconds of sigma of gaussian kernel to use. Default is 50 ms.
 
     """
-    # convert to milliseconds (each index is a millisecond)
-    times = times * 1000
-    sigma *= 1000
+    if sigma is None:
+        sigma = 50
 
     # turn into array of 0s and 1s
-    times_arr = np.zeros((times.shape[0], duration * 1000))
+    times_arr = np.zeros((duration, len(times.columns)))
     for i, unit in enumerate(times):
-        u_times = unit[~np.isnan(unit)].astype(np.int)
-        times_arr[i, u_times] = 1
+        u_times = times[unit] + duration / 2
+        u_times = u_times[~np.isnan(u_times)].astype(np.int)
+        try:
+            times_arr[u_times, i] = 1
+        except IndexError:
+            # sometimes the conversion to np.int can make spikes round to the index just
+            # outside of the range
+            u_times.values[-1] = u_times.values[-1] - 1
 
     # convolve and re-scale so units are per second
-    convolved = gaussian_filter1d(times_arr, sigma)
-    convolved = convolved * 1000
+    convolved = gaussian_filter1d(times_arr, sigma, axis=0) * 1000
+    df = pd.DataFrame(convolved, columns=times.columns)
 
-    return convolved
+    return df

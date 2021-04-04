@@ -353,29 +353,6 @@ class Behaviour(ABC):
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
 
-    def generate_spike_rates(self):
-        """
-        Generate spike rate kernel density estimates from spike times.
-        """
-        spike_times = self._get_spike_times()
-
-        for rec_num, recording in enumerate(self.files):
-            print(f">>>>> Generating spike rates: recording {rec_num + 1} of {len(self.files)}")
-
-            orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
-            # these are all in seconds
-            times = spike_times[rec_num] / orig_rate
-            duration = int(np.ceil(times.max().max()))
-
-            rec_rates = {}
-            results = signal.convolve(times.values.T, duration)
-            for i, unit in enumerate(times):
-                rec_rates[unit] = results[i]
-
-            output = self.processed / recording['spike_rate_processed']
-            as_df = pd.DataFrame(rec_rates)
-            ioutils.write_hdf5(output, as_df)
-
     def sort_spikes(self):
         """
         Run kilosort spike sorting on raw spike data.
@@ -508,12 +485,6 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_spike_data", "spike_processed")
 
-    def get_spike_rate_data(self):
-        """
-        Returns the spike rate data.
-        """
-        return self._get_processed_data("_spike_rate_data", "spike_rate_processed")
-
     def get_lfp_data(self):
         """
         Returns the processed and downsampled LFP data.
@@ -552,7 +523,7 @@ class Behaviour(ABC):
 
     def _get_aligned_spike_times(
         self, label, event, duration, group='good', min_depth=0, max_depth=None,
-        min_spike_width=None, max_spike_width=None, kde=False
+        min_spike_width=None, max_spike_width=None, rate=False, sigma=None
     ):
         """
         Returns spike times for each unit within a given time window around an event.
@@ -560,17 +531,18 @@ class Behaviour(ABC):
         data in scripts.
         """
         action_labels = self.get_action_labels()
-        scan_duration = self.sample_rate * 5
-        half = int((self.sample_rate * duration) / 2)
         selected_units = self.filter_units(
             group, min_depth, max_depth, min_spike_width, max_spike_width
         )
-        trials = []
+        spikes = self._get_spike_times()
 
-        if kde:
-            spikes = self.get_spike_rate_data()
-        else:
-            spikes = self._get_spike_times()
+        if rate:
+            # pad ends with 1 second extra to remove edge effects from convolution
+            duration += 2
+
+        scan_duration = self.sample_rate * 5
+        half = int((self.sample_rate * duration) / 2)
+        trials = []
 
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
@@ -580,10 +552,8 @@ class Behaviour(ABC):
             rec_spikes = spikes[rec_num]
             rec_spikes = rec_spikes[selected_units[rec_num]]
             rec_trials = []
-
-            if not kde:
-                f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
-                rec_spikes = rec_spikes / f
+            f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
+            rec_spikes = rec_spikes / f
 
             for i, start in enumerate(trial_starts):
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
@@ -591,24 +561,22 @@ class Behaviour(ABC):
                     raise PixelsError('Action labels probably miscalculated')
                 centre = start + centre[0]
 
-                if kde:
-                    trial = rec_spikes.iloc[centre - half + 1:centre + half + 1]
-                    trial.index = trial.index - centre
-                    rec_trials.append(trial)
-                else:
-                    trial = rec_spikes[centre - half < rec_spikes]
-                    trial = trial[trial <= centre + half]
-                    trial = trial - centre
-                    tdf = []
+                trial = rec_spikes[centre - half < rec_spikes]
+                trial = trial[trial <= centre + half]
+                trial = trial - centre
+                tdf = []
 
-                    for unit in trial:
-                        u_times = trial[unit].values
-                        u_times = u_times[~np.isnan(u_times)]
-                        u_times = np.unique(u_times)  # remove double-counted spikes
-                        udf = pd.DataFrame({int(unit): u_times})
-                        tdf.append(udf)
-                    if tdf:
-                        rec_trials.append(pd.concat(tdf, axis=1))
+                for unit in trial:
+                    u_times = trial[unit].values
+                    u_times = u_times[~np.isnan(u_times)]
+                    u_times = np.unique(u_times)  # remove double-counted spikes
+                    udf = pd.DataFrame({int(unit): u_times})
+                    tdf.append(udf)
+                if tdf:
+                    tdfc = pd.concat(tdf, axis=1)
+                    if rate:
+                        tdfc = signal.convolve(tdfc, duration * 1000, sigma)
+                    rec_trials.append(tdfc)
 
             rec_df = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
             trials.append(rec_df)
@@ -616,6 +584,16 @@ class Behaviour(ABC):
         trials = pd.concat(trials, axis=1, keys=range(len(trials)), names=["rec_num", "trial", "unit"])
         trials = trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
         trials = trials.sort_index(level=0, axis=1)
+
+        if rate:
+            # Set index to seconds and remove the padding 1 sec at each end
+            points = trials.shape[0]
+            start = (- duration / 2) + (duration / points)
+            timepoints = np.linspace(start, duration / 2, points)
+            trials['time'] = pd.Series(timepoints, index=trials.index)
+            trials = trials.set_index('time')
+            trials = trials.iloc[self.sample_rate : - self.sample_rate]
+
         return trials
 
     def filter_units(
@@ -715,7 +693,7 @@ class Behaviour(ABC):
     @_cacheable
     def align_trials(
         self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
-        max_depth=None, min_spike_width=None, max_spike_width=None,
+        max_depth=None, min_spike_width=None, max_spike_width=None, sigma=None
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -771,7 +749,7 @@ class Behaviour(ABC):
             return self._get_aligned_spike_times(
                 label, event, duration, min_depth=min_depth, max_depth=max_depth,
                 min_spike_width=min_spike_width, max_spike_width=max_spike_width,
-                kde=data == "spike_rate"
+                rate=data == "spike_rate", sigma=sigma
             )
 
         action_labels = self.get_action_labels()
