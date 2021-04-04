@@ -237,7 +237,7 @@ def convolve(times, duration, sigma=None):
         sigma = 50
 
     # turn into array of 0s and 1s
-    times_arr = np.zeros((duration, len(times.columns)))
+    times_arr = np.zeros((int(duration), len(times.columns)))
     for i, unit in enumerate(times):
         u_times = times[unit] + duration / 2
         u_times = u_times[~np.isnan(u_times)].astype(np.int)

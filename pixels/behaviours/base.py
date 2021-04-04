@@ -907,7 +907,7 @@ class Behaviour(ABC):
             group, min_depth, max_depth, min_spike_width, max_spike_width
         )
 
-        duration = 2 * max(abs(win.start - 1), abs(win.stop)) / 1000
+        duration = 2 * max(abs(win.start - 1), abs(win.stop))
         responses = self.align_trials(
             label, event, 'spike_rate', duration=duration, min_depth=min_depth,
             max_depth=max_depth, min_spike_width=min_spike_width,
@@ -920,7 +920,7 @@ class Behaviour(ABC):
         if bl_win is not None:
             if not isinstance(bl_win, slice):
                 raise PixelsError("bl_win arg for get_aligned_spike_rate_CI should be a slice object")
-            duration = 2 * max(abs(bl_win.start - 1), abs(bl_win.stop)) / 1000
+            duration = 2 * max(abs(bl_win.start - 1), abs(bl_win.stop))
             label = label if bl_label is None else bl_label
             event = event if bl_event is None else bl_event
             baselines = self.align_trials(
