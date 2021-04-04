@@ -900,6 +900,41 @@ class Behaviour(ABC):
         group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None,
         sigma=None
     ):
+        """
+        Get the confidence intervals of the mean firing rates within a window aligned to
+        a specified action label and event. An example would be to align firing rates to
+        cue and take a 200 ms pre-cue window, mean the windows, and compute bootstrapped
+        confidence intervals for those values. Optionally baseline the windowed values
+        using values from another window.
+
+        Parameters
+        ----------
+        label : ActionLabel int
+            Action to align to, from a specific behaviour's ActionLabels class.
+
+        event : Event int
+            Event to align to, from a specific behaviour's Events class.
+
+        win : slice
+            Slice object with values in seconds used to extract the window data from
+            aligned firing rate data.
+
+        bl_label, bl_event, bl_win : as above, all optional
+            Equivalent to the above three parameters but for baselining data. By default
+            no baselining is performed.
+
+        ss : int, optional.
+            Sample size of bootstrapped samples.
+
+        CI : int/float, optional
+            Confidence interval size. Default is 95: this returns the 2.5%, 50% and
+            97.5% bootstrap sample percentiles.
+
+        bs : int, optional
+            Number of bootstrapped samples. Default is 10000.
+
+        Remaining parameters are passed to `align_trials`.
+        """
         if not isinstance(win, slice):
             raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
 
