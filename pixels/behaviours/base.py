@@ -27,6 +27,8 @@ from pixels.error import PixelsError
 
 BEHAVIOUR_HZ = 25000
 
+np.random.seed(BEHAVIOUR_HZ)
+
 
 def _cacheable(method):
     def func(*args, **kwargs):
@@ -896,6 +898,7 @@ class Behaviour(ABC):
         bl_label=None, bl_event=None, bl_win=None,
         ss=20, CI=95, bs=10000,
         group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None,
+        sigma=None
     ):
         if not isinstance(win, slice):
             raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
@@ -908,7 +911,7 @@ class Behaviour(ABC):
         responses = self.align_trials(
             label, event, 'spike_rate', duration=duration, min_depth=min_depth,
             max_depth=max_depth, min_spike_width=min_spike_width,
-            max_spike_width=max_spike_width
+            max_spike_width=max_spike_width, sigma=sigma
         )
         series = responses.index.values
         assert series[0] <= win.start < win.stop <= series[-1]
@@ -923,7 +926,8 @@ class Behaviour(ABC):
             baselines = self.align_trials(
                 label, event, 'spike_rate', duration=duration,
                 min_depth=min_depth, max_depth=max_depth,
-                min_spike_width=min_spike_width, max_spike_width=max_spike_width
+                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
+                sigma=sigma
             )
             series = baselines.index.values
             assert series[0] <= bl_win.start < bl_win.stop <= series[-1]
