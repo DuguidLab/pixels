@@ -111,7 +111,8 @@ def binarise(data):
 
 
 def _binarise_real(data):
-    data = (data - min(data)) / max(data)
+    data = data - min(data)
+    data = data / max(data)
     return (data > 0.5).astype(np.int8)
 
 
