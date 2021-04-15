@@ -52,27 +52,39 @@ _action_map = {
 class Reach(Behaviour):
 
     def _extract_action_labels(self, behavioural_data, plot=False):
+        # Correction for sessions where sync channel interfered with LED channel
+        if behavioural_data["/'ReachLEDs'/'0'"].min() < -2:
+            behavioural_data["/'ReachLEDs'/'0'"] = behavioural_data["/'ReachLEDs'/'0'"] \
+                + 0.5 * behavioural_data["/'NpxlSync_Signal'/'0'"]
+
         behavioural_data = signal.binarise(behavioural_data)
         action_labels = np.zeros((len(behavioural_data), 2))
 
         try:
-            cue_leds = behavioural_data["/'Cue_LEDs'/'0'"].values
+            cue_leds = behavioural_data["/'ReachLEDs'/'0'"].values
         except KeyError:
             # some early recordings still used this key
             cue_leds = behavioural_data["/'Back_Sensor'/'0'"].values
 
-        led_onsets = np.where(
-            (cue_leds[:-1] == 0) & (cue_leds[1:] == 1)
-        )[0]
-        led_offsets = np.where(
-            (cue_leds[:-1] == 1) & (cue_leds[1:] == 0)
-        )[0]
+        led_onsets = np.where((cue_leds[:-1] == 0) & (cue_leds[1:] == 1))[0]
+        led_offsets = np.where((cue_leds[:-1] == 1) & (cue_leds[1:] == 0))[0]
         action_labels[led_onsets, 1] = Events.led_on
         action_labels[led_offsets, 1] = Events.led_off
 
+        # QA: Check that the JSON and TDMS data have the same number of trials
         if len(led_onsets) != len(self.metadata["trials"]):
             raise PixelsError(
-                f"{self.name}: Mismatch between mantis and raspberry pi behavioural data"
+                f"{self.name}: Mantis and Raspberry Pi behavioural data have different no. of trials"
+            )
+
+        # QA: Check that the ranks of the cue durations match the JSON data
+        cue_durations_tdms = led_offsets - led_onsets
+        cue_durations_json = [t['cue_duration'] for t in self.metadata['trials']]
+        ranked_tdms = np.argsort(cue_durations_tdms)
+        ranked_json = np.argsort(cue_durations_json)
+        if not np.array_equal(ranked_tdms, ranked_json):
+            raise PixelsError(
+                f"{self.name}: Mantis and Raspberry Pi behavioural data have mismatching trial data."
             )
 
         for i, trial in enumerate(self.metadata["trials"]):
@@ -84,7 +96,7 @@ class Reach(Behaviour):
             plt.clf()
             _, axes = plt.subplots(4, 1, sharex=True, sharey=True)
             axes[0].plot(back_sensor_signal)
-            #axes[1].plot(behavioural_data["/'Cue_LEDs'/'0'"].values)
+            #axes[1].plot(behavioural_data["/'ReachCue_LEDs'/'0'"].values)
             axes[1].plot(behavioural_data["/'Back_Sensor'/'0'"].values)
             axes[2].plot(action_labels[:, 0])
             axes[3].plot(action_labels[:, 1])
