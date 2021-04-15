@@ -33,7 +33,7 @@ class Experiment:
         Path to the folder containing training metadata JSON files.
 
     """
-    def __init__(self, mouse_ids, behaviour, data_dir, meta_dir):
+    def __init__(self, mouse_ids, behaviour, data_dir, meta_dir=None):
         if not isinstance(mouse_ids, (list, tuple, set)):
             mouse_ids = [mouse_ids]
 
@@ -41,21 +41,26 @@ class Experiment:
         self.mouse_ids = mouse_ids
 
         self.data_dir = Path(data_dir).expanduser()
-        self.meta_dir = Path(meta_dir).expanduser()
         if not self.data_dir.exists():
             raise PixelsError(f"Directory not found: {data_dir}")
-        if not self.meta_dir.exists():
-            raise PixelsError(f"Directory not found: {meta_dir}")
+
+        if meta_dir:
+            self.meta_dir = Path(meta_dir).expanduser()
+            if not self.meta_dir.exists():
+                raise PixelsError(f"Directory not found: {meta_dir}")
+        else:
+            self.meta_dir = None
 
         self.raw = self.data_dir / 'raw'
         self.processed = self.data_dir / 'processed'
         self.interim = self.data_dir / 'interim'
 
         self.sessions = []
+
         for session in ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir):
             self.sessions.append(
                 behaviour(
-                    session['sessions'],
+                    session['name'],
                     metadata=session['metadata'],
                     data_dir=session['data_dir'],
                 )
@@ -152,6 +157,7 @@ class Experiment:
             keys=range(len(trials)),
             names=["session", "rec_num", "unit", "trial"]
         )
+
         return df
 
     def get_cluster_info(self):
