@@ -532,7 +532,8 @@ class Behaviour(ABC):
 
     def _get_aligned_spike_times(
         self, label, event, duration, group='good', min_depth=0, max_depth=None,
-        min_spike_width=None, max_spike_width=None, rate=False, sigma=None
+        min_spike_width=None, max_spike_width=None, rate=False, sigma=None,
+        uncurated=False
     ):
         """
         Returns spike times for each unit within a given time window around an event.
@@ -541,7 +542,7 @@ class Behaviour(ABC):
         """
         action_labels = self.get_action_labels()
         selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width
+            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
         )
         spikes = self._get_spike_times()
 
@@ -606,7 +607,8 @@ class Behaviour(ABC):
         return trials
 
     def filter_units(
-        self, group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None
+        self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
+        max_spike_width=None, uncurated=False
     ):
         """
         Select units based on specified criteria.
@@ -626,6 +628,8 @@ class Behaviour(ABC):
         else:
             widths = None
 
+        grouping = 'KSLabel' if uncurated else 'good'
+
         for rec_num in range(len(self.files)):
             rec_info = cluster_info[rec_num]
             rec_units = []
@@ -637,7 +641,7 @@ class Behaviour(ABC):
                 unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
 
                 # we only want units that are in the specified group
-                if not group or unit_info['group'] == group:
+                if not group or unit_info[grouping] == group:
 
                     # and that are within the specified depth range
                     if min_depth is not None:
@@ -702,7 +706,8 @@ class Behaviour(ABC):
     @_cacheable
     def align_trials(
         self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
-        max_depth=None, min_spike_width=None, max_spike_width=None, sigma=None
+        max_depth=None, min_spike_width=None, max_spike_width=None, sigma=None,
+        uncurated=False
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -758,7 +763,7 @@ class Behaviour(ABC):
             return self._get_aligned_spike_times(
                 label, event, duration, min_depth=min_depth, max_depth=max_depth,
                 min_spike_width=min_spike_width, max_spike_width=max_spike_width,
-                rate=data == "spike_rate", sigma=sigma
+                rate=data == "spike_rate", sigma=sigma, uncurated=uncurated
             )
 
         action_labels = self.get_action_labels()
@@ -783,7 +788,7 @@ class Behaviour(ABC):
         # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
         # the action labels, so always give it 5 seconds to scan, then 'half' is used to
         # index data.
-        scan_duration = self.sample_rate * 5
+        scan_duration = self.sample_rate * 10
         half = (sample_rate * duration) // 2
 
         for rec_num in range(len(self.files)):
@@ -792,7 +797,10 @@ class Behaviour(ABC):
             trial_starts = np.where((actions == label))[0]
 
             for start in trial_starts:
-                centre = start + np.where(events[start:start + scan_duration] == event)[0][0]
+                centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
+                if len(centre) == 0:
+                    raise PixelsError('Action labels probably miscalculated')
+                centre = start + centre[0]
                 centre = int(centre * sample_rate / self.sample_rate)
                 trial = values[rec_num][centre - half + 1:centre + half + 1]
                 trials.append(trial.reset_index(drop=True))
@@ -860,13 +868,13 @@ class Behaviour(ABC):
     @_cacheable
     def get_spike_waveforms(
         self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
-        max_spike_width=None
+        max_spike_width=None, uncurated=False
     ):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
         selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width
+            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
         )
 
         waveforms = []
@@ -905,7 +913,7 @@ class Behaviour(ABC):
         bl_label=None, bl_event=None, bl_win=None,
         ss=20, CI=95, bs=10000,
         group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None,
-        sigma=None
+        sigma=None, uncurated=False
     ):
         """
         Get the confidence intervals of the mean firing rates within a window aligned to
@@ -946,7 +954,7 @@ class Behaviour(ABC):
             raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
 
         selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width
+            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
         )
 
         duration = 2 * max(abs(win.start - 1), abs(win.stop))
