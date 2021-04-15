@@ -127,7 +127,10 @@ class Behaviour(ABC):
             with lag_file.open() as fd:
                 lag = json.load(fd)
             for rec_num, rec_lag in enumerate(lag):
-                self._lag[rec_num] = (rec_lag['lag_start'], rec_lag['lag_end'])
+                if rec_lag['lag_start'] is None:
+                    self._lag[rec_num] = None
+                else:
+                    self._lag[rec_num] = (rec_lag['lag_start'], rec_lag['lag_end'])
 
     def get_probe_depth(self):
         """
@@ -165,13 +168,13 @@ class Behaviour(ABC):
 
         raw = self.raw / name
         if raw.exists():
-            print(f"    Copying {name} to interim")
+            print(f"    {self.name}: Copying {name} to interim")
             copyfile(raw, interim)
             return interim
 
         tar = raw.with_name(raw.name + '.tar.gz')
         if tar.exists():
-            print(f"    Extracting {tar.name} to interim")
+            print(f"    {self.name}: Extracting {tar.name} to interim")
             with tarfile.open(tar) as open_tar:
                 open_tar.extractall(path=self.interim)
             return interim
@@ -199,7 +202,7 @@ class Behaviour(ABC):
             The sync channel from either the spike or LFP data.
 
         """
-        print("> Finding lag between sync channels")
+        print("    Finding lag between sync channels")
         recording = self.files[rec_num]
 
         if behavioural_data is None:
@@ -236,8 +239,12 @@ class Behaviour(ABC):
         print(f"    Calculated lag: {(lag_start, lag_end)}")
 
         lag_json = []
-        for lag_start, lag_end in self._lag:
-            lag_json.append(dict(lag_start=lag_start, lag_end=lag_end))
+        for lag in self._lag:
+            if lag is None:
+                lag_json.append(dict(lag_start=None, lag_end=None))
+            else:
+                lag_start, lag_end = lag
+                lag_json.append(dict(lag_start=lag_start, lag_end=lag_end))
         with (self.processed / 'lag.json').open('w') as fd:
             json.dump(lag_json, fd)
 
@@ -516,7 +523,7 @@ class Behaviour(ABC):
 
                 lag_start, _ = self._lag[rec_num]
                 if lag_start < 0:
-                    times += lag_start
+                    times = times + lag_start
 
                 for c in np.unique(clust):
                     by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
