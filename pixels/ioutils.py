@@ -48,12 +48,13 @@ def get_data_files(data_dir, session_name):
         data_dir = list(data_dir.glob(f'{session_name}*'))[0]
     files = []
 
-    spike_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.bin*')
-    spike_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.ap.meta*')
-    lfp_data = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.bin*')
-    lfp_meta = glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec0.lf.meta*')
-    behaviour = glob.glob(f'{data_dir}/[0-9a-zA-Z_-]*([0-9]).tdms*')
-    camera = glob.glob(f'{data_dir}/*Camera*.tdms*')
+    spike_data = sorted(glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec[0-9].ap.bin*'))
+    spike_meta = sorted(glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec[0-9].ap.meta*'))
+    lfp_data = sorted(glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec[0-9].lf.bin*'))
+    lfp_meta = sorted(glob.glob(f'{data_dir}/{session_name}_g[0-9]_t0.imec[0-9].lf.meta*'))
+    behaviour = sorted(glob.glob(f'{data_dir}/[0-9a-zA-Z_-]*([0-9]).tdms*'))
+
+    camera = sorted(glob.glob(f'{data_dir}/[0-9a-zA-Z_-]*([0-9])-*.tdms*'))
     camera_data = []
     camera_meta = []
     for match in camera:
@@ -62,8 +63,14 @@ def get_data_files(data_dir, session_name):
         else:
             camera_data.append(match)
 
-    if not (spike_data and spike_meta and lfp_data and lfp_meta):
-        raise PixelsError(f"{session_name}: raw files not correctly named.")
+    if not spike_data:
+        raise PixelsError(f"{session_name}: could not find raw AP data file.")
+    if not spike_meta:
+        raise PixelsError(f"{session_name}: could not find raw AP metadata file.")
+    if not lfp_data:
+        raise PixelsError(f"{session_name}: could not find raw LFP data file.")
+    if not lfp_meta:
+        raise PixelsError(f"{session_name}: could not find raw LFP metadata file.")
 
     for num, spike_recording in enumerate(spike_data):
         recording = {}
