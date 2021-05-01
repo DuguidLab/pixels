@@ -30,6 +30,16 @@ class ActionLabels:
     incorrect_left = 1 << 4
     incorrect_right = 1 << 5
 
+    # visual-only experiments with naive mice
+    naive_left_short = 1 << 6
+    naive_left_long = 1 << 7
+    naive_right_short = 1 << 8
+    naive_right_long = 1 << 9
+    naive_left = naive_left_short | naive_left_long
+    naive_right = naive_right_short | naive_right_long
+    naive_short = naive_left_short | naive_right_short
+    naive_long = naive_left_long | naive_right_long
+
 
 class Events:
     led_on = 1
