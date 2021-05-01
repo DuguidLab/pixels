@@ -106,6 +106,15 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.sort_spikes()
 
+    def assess_noise(self):
+        """
+        Assess the noise for the raw AP data.
+        """
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Assessing noise for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
+            session.assess_noise()
+
     def process_lfp(self):
         """
         Process the LFP data from the raw neural recording data for all sessions.

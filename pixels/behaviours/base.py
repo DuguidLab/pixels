@@ -383,6 +383,39 @@ class Behaviour(ABC):
             print(f"> Running kilosort")
             ss.run_kilosort3(recording=recording, output_folder=output)
 
+    def assess_noise(self):
+        """
+        Assess noise in the raw AP data.
+        """
+        for rec_num, recording in enumerate(self.files):
+            print(
+                f">>>>> Assessing noise for recording {rec_num + 1} of {len(self.files)}"
+            )
+            output = self.processed / f'noise_{rec_num}.json'
+            if output.exists():
+                continue
+
+            data_file = self.find_file(recording['spike_data'])
+            num_chans = self.spike_meta[rec_num]['nSavedChans']
+            data = ioutils.read_bin(data_file, num_chans)
+
+            # sample some points -- it takes too long to use them all
+            length = data.shape[0]
+            points = np.random.choice(range(length), length // 60, replace=False)
+            sample = data[points, :]
+            median = np.median(sample, axis=1)
+            SDs = []
+            for i in range(385):
+                SDs.append(np.std(sample[:, i] - median))
+
+            results = dict(
+                median=np.median(SDs),
+                SDs=SDs,
+            )
+
+            with open(output, 'w') as fd:
+                json.dump(results, fd)
+
     def extract_videos(self):
         """
         Extract behavioural videos from TDMS to avi.
