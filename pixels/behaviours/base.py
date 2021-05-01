@@ -373,7 +373,12 @@ class Behaviour(ABC):
 
             output = self.processed / f'sorted_{rec_num}'
             data_file = self.find_file(recording['spike_data'])
-            recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
+            try:
+                recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
+            except ValueError as e:
+                raise PixelsError(
+                    f"Did the raw data get fully copied to interim? Full error: {e}"
+                )
 
             print(f"> Running kilosort")
             ss.run_kilosort3(recording=recording, output_folder=output)
