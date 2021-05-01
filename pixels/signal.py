@@ -189,33 +189,6 @@ def find_sync_lag(array1, array2, plot=False):
     return lag, match
 
 
-def median_subtraction(array, axis):
-    """
-    Subtract the medians of a given axis.
-
-    Parameters
-    ----------
-    array : array, Series or similar
-        The array to process.
-
-    axis : int
-        The axis in which to take the median and subtract.
-
-    Returns
-    -------
-    array : The processed array with medians subtracted.
-
-    """
-    if not array.ndim > axis:
-        raise PixelsError("Not enough dimensions to perform median subtraction.")
-
-    #for i in range(array.shape[axis]):
-    array = np.median(array, axis=axis, keepdims=True)
-    #    array[:, i] = array[:, i] - np.median(array[:, i], axis=axis)
-
-    return array
-
-
 def convolve(times, duration, sigma=None):
     """
     Create a continuous signal from a set of spike times in milliseconds and convolve
