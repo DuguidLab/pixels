@@ -422,27 +422,28 @@ class Behaviour(ABC):
         Extract behavioural videos from TDMS to avi.
         """
         for recording in self.files:
-            path = self.find_file(recording['camera_data'])
-            path_avi = path.with_suffix('.avi')
-            if path_avi.exists():
-                continue
+            if 'camera_data' in recording:
+                path = self.find_file(recording['camera_data'])
+                path_avi = path.with_suffix('.avi')
+                if path_avi.exists():
+                    continue
 
-            df = ioutils.read_tdms(path)
-            meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
-            actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
-            if "/'frames'/'ind_skipped'" in meta:
-                skipped = meta["/'frames'/'ind_skipped'"].dropna().size
-            else:
-                skipped = 0
-            height = int(actual_heights.max())
-            remainder = skipped - actual_heights[actual_heights != height].size
-            duration = actual_heights.size - remainder
-            width = int(df.size / (duration * height))
-            if width != 640:
-                raise PixelsError("Width calculation must be incorrect, discuss.")
+                df = ioutils.read_tdms(path)
+                meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
+                actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
+                if "/'frames'/'ind_skipped'" in meta:
+                    skipped = meta["/'frames'/'ind_skipped'"].dropna().size
+                else:
+                    skipped = 0
+                height = int(actual_heights.max())
+                remainder = skipped - actual_heights[actual_heights != height].size
+                duration = actual_heights.size - remainder
+                width = int(df.size / (duration * height))
+                if width != 640:
+                    raise PixelsError("Width calculation must be incorrect, discuss.")
 
-            video = df.values.reshape((duration, height, int(width)))
-            ioutils.save_ndarray_as_avi(video, path_avi, 50)
+                video = df.values.reshape((duration, height, int(width)))
+                ioutils.save_ndarray_as_avi(video, path_avi, 50)
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """
@@ -458,14 +459,15 @@ class Behaviour(ABC):
             raise PixelsError(f"Config at {config} not found.")
 
         for recording in self.files:
-            video = self.find_file(recording['camera_data']).with_suffix('.avi')
-            if not video.exists():
-                raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
+            if 'camera_data' in recording:
+                video = self.find_file(recording['camera_data']).with_suffix('.avi')
+                if not video.exists():
+                    raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
 
-            deeplabcut.analyze_videos(config, [video])
-            deeplabcut.plot_trajectories(config, [video])
-            if create_labelled_video:
-                deeplabcut.create_labeled_video(config, [video])
+                deeplabcut.analyze_videos(config, [video])
+                deeplabcut.plot_trajectories(config, [video])
+                if create_labelled_video:
+                    deeplabcut.create_labeled_video(config, [video])
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
