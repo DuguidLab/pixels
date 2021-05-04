@@ -669,7 +669,7 @@ class Behaviour(ABC):
         else:
             widths = None
 
-        grouping = 'KSLabel' if uncurated else 'good'
+        grouping = 'KSLabel' if uncurated else 'group'
 
         for rec_num in range(len(self.files)):
             rec_info = cluster_info[rec_num]
