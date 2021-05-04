@@ -3,6 +3,7 @@ __pycache__
 *.pyo
 *.pyd
 .idea
+*.swp
 
 reach.egg-info
 venv
