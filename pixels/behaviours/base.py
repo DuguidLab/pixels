@@ -140,7 +140,8 @@ class Behaviour(ABC):
         if depth_file.exists():
             with depth_file.open() as fd:
                 return float(fd.read())
-        raise PixelsError(self.name + ": Can't load probe depth: please add it in um to processed/depth.txt")
+        msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
+        raise PixelsError(msg)
 
     def find_file(self, name):
         """
