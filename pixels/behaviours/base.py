@@ -1005,7 +1005,7 @@ class Behaviour(ABC):
             max_spike_width=max_spike_width, sigma=sigma
         )
         series = responses.index.values
-        assert series[0] <= win.start < win.stop <= series[-1]
+        assert series[0] <= win.start < win.stop <= series[-1], "Check your slice, it's probably wrong"
         responses = responses.loc[win].mean()
 
         if bl_win is not None:
@@ -1021,7 +1021,7 @@ class Behaviour(ABC):
                 sigma=sigma
             )
             series = baselines.index.values
-            assert series[0] <= bl_win.start < bl_win.stop <= series[-1]
+            assert series[0] <= bl_win.start < bl_win.stop <= series[-1], "Check your bl_slice, it's probably wrong"
             responses = responses - baselines.loc[bl_win].mean()
 
         lower = (100 - CI) / 2
