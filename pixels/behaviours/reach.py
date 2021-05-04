@@ -59,16 +59,16 @@ _action_map = {
 }
 
 
-class Reach(Behaviour):
 
-    def _extract_action_labels(self, behavioural_data, plot=False):
+class Reach(Behaviour):
+    def _preprocess_behaviour(self, behavioural_data):
         # Correction for sessions where sync channel interfered with LED channel
         if behavioural_data["/'ReachLEDs'/'0'"].min() < -2:
             behavioural_data["/'ReachLEDs'/'0'"] = behavioural_data["/'ReachLEDs'/'0'"] \
                 + 0.5 * behavioural_data["/'NpxlSync_Signal'/'0'"]
 
         behavioural_data = signal.binarise(behavioural_data)
-        action_labels = np.zeros((len(behavioural_data), 2))
+        action_labels = np.zeros((len(behavioural_data), 2), dtype=np.int16)
 
         try:
             cue_leds = behavioural_data["/'ReachLEDs'/'0'"].values
@@ -78,8 +78,8 @@ class Reach(Behaviour):
 
         led_onsets = np.where((cue_leds[:-1] == 0) & (cue_leds[1:] == 1))[0]
         led_offsets = np.where((cue_leds[:-1] == 1) & (cue_leds[1:] == 0))[0]
-        action_labels[led_onsets, 1] = Events.led_on
-        action_labels[led_offsets, 1] = Events.led_off
+        action_labels[led_onsets, 1] += Events.led_on
+        action_labels[led_offsets, 1] += Events.led_off
 
         # QA: Check that the JSON and TDMS data have the same number of trials
         if len(led_onsets) != len(self.metadata["trials"]):
@@ -87,30 +87,55 @@ class Reach(Behaviour):
                 f"{self.name}: Mantis and Raspberry Pi behavioural data have different no. of trials"
             )
 
-        # QA: Check that the ranks of the cue durations match the JSON data
+        # QA: Check that the cue durations (mostly) match between JSON and TDMS data
         cue_durations_tdms = led_offsets - led_onsets
-        cue_durations_json = [t['cue_duration'] for t in self.metadata['trials']]
-        ranked_tdms = np.argsort(cue_durations_tdms)
-        ranked_json = np.argsort(cue_durations_json)
-        if not np.array_equal(ranked_tdms, ranked_json):
+        cue_durations_json = np.array(
+            [t['cue_duration'] for t in self.metadata['trials']]
+        ).round()
+        cue_durations_tdms = np.round(cue_durations_tdms / 100)
+        cue_durations_json = np.round(cue_durations_json / 100)
+        error = sum((cue_durations_tdms - cue_durations_json) != 0) / len(led_onsets)
+        if error > 0.05:
             raise PixelsError(
                 f"{self.name}: Mantis and Raspberry Pi behavioural data have mismatching trial data."
             )
 
+        return behavioural_data, action_labels, led_onsets
+
+    def _extract_action_labels(self, behavioural_data, plot=False):
+        behavioural_data, action_labels, led_onsets = self._preprocess_behaviour(behavioural_data)
+
         for i, trial in enumerate(self.metadata["trials"]):
             side = _side_map[trial["spout"]]
             action = _action_map[trial["outcome"]]
-            action_labels[led_onsets[i], 0] = getattr(ActionLabels, f"{action}_{side}")
+            action_labels[led_onsets[i], 0] += getattr(ActionLabels, f"{action}_{side}")
 
         if plot:
             plt.clf()
             _, axes = plt.subplots(4, 1, sharex=True, sharey=True)
             axes[0].plot(back_sensor_signal)
-            #axes[1].plot(behavioural_data["/'ReachCue_LEDs'/'0'"].values)
-            axes[1].plot(behavioural_data["/'Back_Sensor'/'0'"].values)
+            if "/'Back_Sensor'/'0'" in behavioural_data:
+                axes[1].plot(behavioural_data["/'Back_Sensor'/'0'"].values)
+            else:
+                axes[1].plot(behavioural_data["/'ReachCue_LEDs'/'0'"].values)
             axes[2].plot(action_labels[:, 0])
             axes[3].plot(action_labels[:, 1])
             plt.plot(action_labels[:, 1])
             plt.show()
+
+        return action_labels
+
+
+class VisualOnly(Reach):
+    def _extract_action_labels(self, behavioural_data, plot=False):
+        behavioural_data, action_labels, led_onsets = self._preprocess_behaviour(behavioural_data)
+
+        for i, trial in enumerate(self.metadata["trials"]):
+            label = "naive_" + _side_map[trial["spout"]] + "_"
+            if trial["cue_duration"] > 125:
+                label += "long"
+            else:
+                label += "short"
+            action_labels[led_onsets[i], 0] += getattr(ActionLabels, label)
 
         return action_labels

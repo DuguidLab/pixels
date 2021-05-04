@@ -598,7 +598,7 @@ class Behaviour(ABC):
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
-            trial_starts = np.where((actions == label))[0]
+            trial_starts = np.where(np.bitwise_and(actions, label))[0]
 
             rec_spikes = spikes[rec_num]
             rec_spikes = rec_spikes[selected_units[rec_num]]
