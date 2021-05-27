@@ -7,12 +7,15 @@ base for defining behaviour-specific processing.
 import functools
 import json
 import os
+import pickle
 import tarfile
+import tempfile
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from shutil import copyfile
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.stats
@@ -424,26 +427,15 @@ class Behaviour(ABC):
         for recording in self.files:
             if 'camera_data' in recording:
                 path = self.find_file(recording['camera_data'])
-                path_avi = path.with_suffix('.avi')
-                if path_avi.exists():
+                path_out = path.with_suffix('.mp4')
+                if path_out.exists():
                     continue
 
-                df = ioutils.read_tdms(path)
-                meta = ioutils.read_tdms(self.find_file(recording['camera_meta']))
-                actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
-                if "/'frames'/'ind_skipped'" in meta:
-                    skipped = meta["/'frames'/'ind_skipped'"].dropna().size
-                else:
-                    skipped = 0
-                height = int(actual_heights.max())
-                remainder = skipped - actual_heights[actual_heights != height].size
-                duration = actual_heights.size - remainder
-                width = int(df.size / (duration * height))
-                if width != 640:
-                    raise PixelsError("Width calculation must be incorrect, discuss.")
-
-                video = df.values.reshape((duration, height, int(width)))
-                ioutils.save_ndarray_as_avi(video, path_avi, 50)
+                video = ioutils.load_tdms_video(
+                    self.find_file(recording['camera_data']),
+                    self.find_file(recording['camera_meta']),
+                )
+                ioutils.save_ndarray_as_video(video, path_out, 100)
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """
@@ -460,7 +452,7 @@ class Behaviour(ABC):
 
         for recording in self.files:
             if 'camera_data' in recording:
-                video = self.find_file(recording['camera_data']).with_suffix('.avi')
+                video = self.find_file(recording['camera_data']).with_suffix('.mp4')
                 if not video.exists():
                     raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
 
@@ -468,6 +460,74 @@ class Behaviour(ABC):
                 deeplabcut.plot_trajectories(config, [video])
                 if create_labelled_video:
                     deeplabcut.create_labeled_video(config, [video])
+
+    def draw_motion_index_rois(self, num_rois=1):
+        """
+        Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
+
+        Parameters
+        ----------
+        num_rois : int
+            The number of ROIs to draw interactively. Default: 1
+
+        """
+        # Only needed for this method
+        import cv2
+        import EasyROI
+
+        roi_helper = EasyROI.EasyROI(verbose=False)
+
+        for i, recording in enumerate(self.files):
+            if 'camera_data' in recording:
+                roi_file = self.processed / f"motion_index_ROIs_{i}.pickle"
+                if roi_file.exists():
+                    continue
+
+                # Load frame from video
+                video = self.find_file(recording['camera_data']).with_suffix('.mp4')
+                frame = ioutils.load_video_frame(video.as_posix(), 100)
+
+                # Interactively draw ROI
+                roi = roi_helper.draw_polygon(frame, num_rois)
+                cv2.destroyAllWindows()  # Needed otherwise EasyROI errors
+
+                # Save a copy of the frame with ROIs to PNG file
+                png = self.processed / f'motion_index_ROIs_{i}.png'
+                copy = EasyROI.visualize_polygon(frame, roi, color=(255, 0, 0))
+                plt.imsave(png, copy, cmap='gray')
+
+                # Save ROI to file
+                with roi_file.open('wb') as fd:
+                    pickle.dump(roi['roi'], fd)
+
+    def process_motion_index(self):
+        """
+        Extract motion indexes from videos using already drawn ROIs.
+        """
+
+        ses_rois = {}
+
+        # First collect all ROIs to catch errors early
+        for i, recording in enumerate(self.files):
+            if 'camera_data' in recording:
+                roi_file = self.processed / f"motion_index_ROIs_{i}.pickle"
+                if not roi_file.exists():
+                    PixelsError(self.name + ": ROIs not drawn for motion index.")
+
+                with roi_file.open('rb') as fd:
+                    ses_rois[i] = pickle.load(fd)
+
+        # Then do the extraction
+        for i, recording in enumerate(self.files):
+            if 'camera_data' in recording:
+
+                # Get MIs
+                path = self.find_file(recording['camera_data']).with_suffix('.mp4')
+                rec_rois = ses_rois[i]
+                rec_mi = signal.motion_index(path.as_posix(), rec_rois)
+
+                # todo: set indexes to time and save as dataframe?
+                np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
 
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):

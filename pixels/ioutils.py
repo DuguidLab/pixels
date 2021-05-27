@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from tempfile import gettempdir
 
+import cv2
 import ffmpeg
 import numpy as np
 import pandas as pd
@@ -192,6 +193,7 @@ def read_tdms(path, groups=None):
         if groups is None:
             df = tdms_file.as_dataframe()
         else:
+            # TODO: Use TdmsFile.open instead of read, and only load desired groups
             data = []
             for group in groups:
                 channel = tdms_file[group].channels()[0]
@@ -202,15 +204,16 @@ def read_tdms(path, groups=None):
     return df
 
 
-def save_ndarray_as_avi(video, path, frame_rate):
+def save_ndarray_as_video(video, path, frame_rate):
     """
-    Save a numpy.ndarray as an .avi video.
+    Save a numpy.ndarray as video file.
 
     Parameters
     ----------
     video : numpy.ndarray
         Video data to save to file. It's dimensions should be (duration, height, width)
-        and data should be of uint8 type.
+        and data should be of uint8 type. The file extension determines the resultant
+        file type.
 
     path : string / pathlib.Path object
         File to which the video will be saved.
@@ -225,7 +228,7 @@ def save_ndarray_as_avi(video, path, frame_rate):
     process = (
         ffmpeg
         .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
-        .output(path.as_posix(), pix_fmt='yuv420p', r=frame_rate)
+        .output(path.as_posix(), pix_fmt='yuv420p', r=frame_rate, crf=0, vcodec='libx264')
         .overwrite_output()
         .run_async(pipe_stdin=True)
     )
@@ -240,7 +243,7 @@ def save_ndarray_as_avi(video, path, frame_rate):
     process.stdin.close()
     process.wait()
     if not path.exists():
-        raise PixelsError(f"AVI creation failed: {path}")
+        raise PixelsError(f"Video creation failed: {path}")
 
 
 def read_hdf5(path):
@@ -350,3 +353,111 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
             print(f'Found no sessions for: {mouse}')
 
     return sessions
+
+
+def load_tdms_video(path, meta_path, frame=None):
+    """
+    Calculate the 3 dimensions for a given video from TDMS metadata and reshape the
+    video to these dimensions.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        File path to TDMS video file.
+
+    meta_path : pathlib.Path
+        File path to TDMS file containing metadata about the video.
+
+    frame : int, optional
+        Read this one single frame rather than them all.
+
+    """
+    meta = read_tdms(meta_path)
+    actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
+
+    if "/'frames'/'ind_skipped'" in meta:
+        skipped = meta["/'frames'/'ind_skipped'"].dropna().size
+        print(f"Warning: video has skipped {skipped} frames.")
+    else:
+        skipped = 0
+
+    height = int(actual_heights.max())
+    remainder = skipped - actual_heights[actual_heights != height].size
+    duration = actual_heights.size - remainder
+
+    if frame is None:
+        video = read_tdms(path)
+        width = int(video.size / (duration * height))
+        return video.values.reshape(duration, height, width)
+
+    with TdmsFile.open(path) as tdms_file:
+        group = tdms_file.groups()[0]
+        channel = group.channels()[0]
+        width = int(len(channel) / (duration * height))
+        length = width * height
+        start = frame * length
+        video = channel[start : start + length]
+        return video.reshape(height, width)
+
+
+def load_video_frame(path, frame):
+    """
+    Load a frame from a video into a numpy array.
+
+    Parameters
+    ----------
+    path : str
+        File path to a video file.
+
+    frame : int
+        0-based index of frame to load.
+
+    """
+    video = cv2.VideoCapture(path)
+
+    retval = video.set(cv2.CAP_PROP_POS_FRAMES, frame)
+    assert retval  # Check it worked fine
+
+    retval, frame = video.read()
+    assert retval  # Check it worked fine
+
+    return frame
+
+
+def get_video_dimensions(path):
+    """
+    Get a tuple of (width, height, frames) for a video.
+
+    Parameters
+    ----------
+    path : str
+        File path to a video file.
+
+    """
+    video = cv2.VideoCapture(path)
+
+    width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    return width, height, frames
+
+
+def stream_video(path):
+    """
+    Iterate over a video's frames.
+
+    Parameters
+    ----------
+    path : str
+        File path to a video file.
+
+    """
+    video = cv2.VideoCapture(path)
+    frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    while True:
+        _, pixels = video.read()
+        if pixels is None:
+            return
+        yield pixels[:, :, 0]  # TODO: should be 1 channel

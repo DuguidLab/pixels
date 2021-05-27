@@ -6,13 +6,14 @@ This module provides functions that operate on signal data.
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import scipy.signal
 from scipy.ndimage import gaussian_filter1d
 
-from pixels import PixelsError
+from pixels import ioutils, PixelsError
 
 
 def resample(array, from_hz, to_hz, padtype=None):
@@ -227,3 +228,44 @@ def convolve(times, duration, sigma=None):
     df = pd.DataFrame(convolved, columns=times.columns)
 
     return df
+
+
+def motion_index(video, rois):
+    """
+    Calculating motion indexes from a video for a set of ROIs.
+
+    Parameters
+    -------
+    video : str
+        Path to a video.
+
+    rois : dict, as saved by Behaviour.draw_motion_index_rois
+        Regions of interest used to mask video when calculating MIs.
+
+    """
+    width, height, duration = ioutils.get_video_dimensions(video)
+    mi = np.zeros((duration, len(rois)))
+
+    # Create roi masks
+    masks = np.zeros((width, height, len(rois)), dtype=np.uint8)
+
+    for i, roi in enumerate(sorted(rois)):
+        polygon = np.array(rois[roi]['vertices'], dtype=np.int32)
+        mask = np.zeros((width, height, 1), dtype=np.uint8)
+        # this complains when passed a view into another array for some reason
+        cv2.fillConvexPoly(mask, polygon, (1,))
+        np.copyto(masks[:, :, i], np.squeeze(mask))
+
+    # Calculate motion indexes
+    prev_frame = np.zeros((width, height, 1), dtype=np.uint8)
+    masked = np.zeros(masks.shape, dtype=np.uint8)
+
+    for i, frame in enumerate(ioutils.stream_video(video)):
+        masked = masks * frame.T[:, :, None] - prev_frame
+        mi[i] = (masked * masked).sum(axis=0).sum(axis=0)
+
+    # Normalise
+    mi = mi - mi.min(axis=0)
+    mi = mi / mi.max(axis=0)
+
+    return mi

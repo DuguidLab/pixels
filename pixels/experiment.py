@@ -152,6 +152,33 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.process_motion_tracking(config, create_labelled_video)
 
+    def draw_motion_index_rois(self, num_rois=1):
+        """
+        Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
+
+        Parameters
+        ----------
+        num_rois : int
+            The number of ROIs to draw interactively. Default: 1
+
+        """
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Drawing motion index ROIs for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
+            session.draw_motion_index_rois(num_rois=num_rois)
+
+    def process_motion_index(self, num_rois=1):
+        """
+        Extract motion indexes from videos for all sessions.
+        """
+        for session in self.sessions:
+            session.draw_motion_index_rois(num_rois=num_rois)
+
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Processing motion index for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
+            session.process_motion_index()
+
     def align_trials(self, *args, **kwargs):
         """
         Get trials aligned to an event. Check behaviours.base.Behaviour.align_trials for
