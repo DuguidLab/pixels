@@ -431,11 +431,11 @@ class Behaviour(ABC):
                 if path_out.exists():
                     continue
 
-                video = ioutils.load_tdms_video(
+                video, fps = ioutils.load_tdms_video(
                     self.find_file(recording['camera_data']),
                     self.find_file(recording['camera_meta']),
                 )
-                ioutils.save_ndarray_as_video(video, path_out, 100)
+                ioutils.save_ndarray_as_video(video, path_out, fps)
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """

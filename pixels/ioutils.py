@@ -227,7 +227,7 @@ def save_ndarray_as_video(video, path, frame_rate):
 
     process = (
         ffmpeg
-        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
+        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}', r=frame_rate)
         .output(path.as_posix(), pix_fmt='yuv420p', r=frame_rate, crf=0, vcodec='libx264')
         .overwrite_output()
         .run_async(pipe_stdin=True)
@@ -375,6 +375,10 @@ def load_tdms_video(path, meta_path, frame=None):
     meta = read_tdms(meta_path)
     actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
 
+    stamps = np.uint64(meta.values[:, 3]) + np.left_shift(np.uint64(meta.values[:, 2]), np.uint64(32))
+    rate = round(np.diff(stamps / 1000000).mean())
+    print(f"Frame rate is {rate} ms per frame, {1000/rate} fps")
+
     if "/'frames'/'ind_skipped'" in meta:
         skipped = meta["/'frames'/'ind_skipped'"].dropna().size
         print(f"Warning: video has skipped {skipped} frames.")
@@ -388,7 +392,7 @@ def load_tdms_video(path, meta_path, frame=None):
     if frame is None:
         video = read_tdms(path)
         width = int(video.size / (duration * height))
-        return video.values.reshape(duration, height, width)
+        return video.values.reshape(duration, height, width), rate
 
     with TdmsFile.open(path) as tdms_file:
         group = tdms_file.groups()[0]
@@ -397,7 +401,7 @@ def load_tdms_video(path, meta_path, frame=None):
         length = width * height
         start = frame * length
         video = channel[start : start + length]
-        return video.reshape(height, width)
+        return video.reshape(height, width), rate
 
 
 def load_video_frame(path, frame):
