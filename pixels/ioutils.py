@@ -93,6 +93,7 @@ def get_data_files(data_dir, session_name):
         if len(camera_data) > num:
             recording['camera_data'] = original_name(camera_data[num])
             recording['camera_meta'] = original_name(camera_meta[num])
+            recording['motion_index'] = Path(f'motion_index_{num}.npy')
         recording['action_labels'] = Path(f'action_labels_{num}.npy')
         recording['spike_processed'] = recording['spike_data'].with_name(
             recording['spike_data'].stem + '_processed.h5'
@@ -355,6 +356,30 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     return sessions
 
 
+def _parse_tdms_metadata(meta_path):
+    meta = read_tdms(meta_path)
+
+    ts_high = np.uint64(meta["/'keys'/'IMAQdxTimestampHigh'"])
+    ts_low = np.uint64(meta["/'keys'/'IMAQdxTimestampLow'"])
+    stamps = ts_low + np.left_shift(ts_high, 32)
+    rate = round(np.diff(stamps / 1000000).mean())
+    print(f"    Frame rate is {rate} ms per frame, {1000/rate} fps")
+
+    if "/'frames'/'ind_skipped'" in meta:
+        skipped = meta["/'frames'/'ind_skipped'"].dropna().size
+        print(f"    Warning: video has skipped {skipped} frames.")
+    else:
+        skipped = 0
+
+    actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
+    height = int(actual_heights.max())
+    remainder = skipped - actual_heights[actual_heights != height].size
+    duration = actual_heights.size - remainder
+    fps = 1000 / rate
+
+    return fps, skipped, height, duration
+
+
 def load_tdms_video(path, meta_path, frame=None):
     """
     Calculate the 3 dimensions for a given video from TDMS metadata and reshape the
@@ -372,27 +397,12 @@ def load_tdms_video(path, meta_path, frame=None):
         Read this one single frame rather than them all.
 
     """
-    meta = read_tdms(meta_path)
-    actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
-
-    stamps = np.uint64(meta.values[:, 3]) + np.left_shift(np.uint64(meta.values[:, 2]), np.uint64(32))
-    rate = round(np.diff(stamps / 1000000).mean())
-    print(f"Frame rate is {rate} ms per frame, {1000/rate} fps")
-
-    if "/'frames'/'ind_skipped'" in meta:
-        skipped = meta["/'frames'/'ind_skipped'"].dropna().size
-        print(f"Warning: video has skipped {skipped} frames.")
-    else:
-        skipped = 0
-
-    height = int(actual_heights.max())
-    remainder = skipped - actual_heights[actual_heights != height].size
-    duration = actual_heights.size - remainder
+    fps, skipped, height, duration = _parse_tdms_metadata(meta_path)
 
     if frame is None:
         video = read_tdms(path)
         width = int(video.size / (duration * height))
-        return video.values.reshape(duration, height, width), rate
+        return video.values.reshape(duration, height, width), fps
 
     with TdmsFile.open(path) as tdms_file:
         group = tdms_file.groups()[0]
@@ -401,7 +411,54 @@ def load_tdms_video(path, meta_path, frame=None):
         length = width * height
         start = frame * length
         video = channel[start : start + length]
-        return video.reshape(height, width), rate
+        return video.reshape(height, width), fps
+
+
+def tdms_to_video(tdms_path, meta_path, output_path):
+    """
+    Convert a TDMS video to a video file. This streams data from TDMS to the saved video
+    in a way that never loads all data into memory, so works well on huge videos.
+
+    Parameters
+    ----------
+    tdms_path : pathlib.Path
+        File path to TDMS video file.
+
+    meta_path : pathlib.Path
+        File path to TDMS file containing metadata about the video.
+
+    output_path : pathlib.Path
+        Save the video to this file. The video format used is taken from the file
+        extension of this path.
+
+    """
+    fps, skipped, height, duration = _parse_tdms_metadata(meta_path)
+
+    tdms_file = TdmsFile.open(tdms_path)
+    group = tdms_file.groups()[0]
+    channel = group.channels()[0]
+    width = int(len(channel) / (duration * height))
+    step = width * height
+
+    process = (
+        ffmpeg
+        .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}', r=fps)
+        .output(output_path.as_posix(), pix_fmt='yuv420p', r=fps, crf=0, vcodec='libx264')
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
+    )
+
+    for frame in range(duration):
+        pixels = channel[frame * step: (frame + 1) * step].reshape((width, height))
+        process.stdin.write(
+            np.stack([pixels, pixels, pixels], axis=2)
+            .astype(np.uint8)
+            .tobytes()
+        )
+
+    process.stdin.close()
+    process.wait()
+    tdms_file.close()
 
 
 def load_video_frame(path, frame):

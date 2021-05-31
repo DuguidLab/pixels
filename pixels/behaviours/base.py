@@ -420,22 +420,22 @@ class Behaviour(ABC):
             with open(output, 'w') as fd:
                 json.dump(results, fd)
 
-    def extract_videos(self):
+    def extract_videos(self, force=False):
         """
         Extract behavioural videos from TDMS to avi.
         """
         for recording in self.files:
             if 'camera_data' in recording:
                 path = self.find_file(recording['camera_data'])
-                path_out = path.with_suffix('.mp4')
-                if path_out.exists():
+                path_out = path.with_suffix('.avi')
+                if path_out.exists() and not force:
                     continue
 
-                video, fps = ioutils.load_tdms_video(
+                ioutils.tdms_to_video(
                     self.find_file(recording['camera_data']),
                     self.find_file(recording['camera_meta']),
+                    path_out,
                 )
-                ioutils.save_ndarray_as_video(video, path_out, fps)
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """
@@ -452,7 +452,7 @@ class Behaviour(ABC):
 
         for recording in self.files:
             if 'camera_data' in recording:
-                video = self.find_file(recording['camera_data']).with_suffix('.mp4')
+                video = self.find_file(recording['camera_data']).with_suffix('.avi')
                 if not video.exists():
                     raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
 
@@ -484,7 +484,7 @@ class Behaviour(ABC):
                     continue
 
                 # Load frame from video
-                video = self.find_file(recording['camera_data']).with_suffix('.mp4')
+                video = self.find_file(recording['camera_data']).with_suffix('.avi')
                 frame = ioutils.load_video_frame(video.as_posix(), 100)
 
                 # Interactively draw ROI
@@ -522,7 +522,7 @@ class Behaviour(ABC):
             if 'camera_data' in recording:
 
                 # Get MIs
-                path = self.find_file(recording['camera_data']).with_suffix('.mp4')
+                path = self.find_file(recording['camera_data']).with_suffix('.avi')
                 rec_rois = ses_rois[i]
                 rec_mi = signal.motion_index(path.as_posix(), rec_rois)
 

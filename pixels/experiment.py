@@ -133,14 +133,14 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.process_behaviour()
 
-    def extract_videos(self):
+    def extract_videos(self, force=False):
         """
         Extract videos from TDMS in the raw folder to avi files in the interim folder.
         """
         for i, session in enumerate(self.sessions):
             print(">>>>> Extracting videos for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.extract_videos()
+            session.extract_videos(force=force)
 
     def process_motion_tracking(self, config, create_labelled_video=True):
         """
