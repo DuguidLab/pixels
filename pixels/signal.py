@@ -230,7 +230,7 @@ def convolve(times, duration, sigma=None):
     return df
 
 
-def motion_index(video, rois):
+def motion_index(video, rois, output_hz):
     """
     Calculating motion indexes from a video for a set of ROIs.
 
@@ -241,6 +241,9 @@ def motion_index(video, rois):
 
     rois : dict, as saved by Behaviour.draw_motion_index_rois
         Regions of interest used to mask video when calculating MIs.
+
+    output_hz : int
+        Frequency to save output MI as.
 
     """
     width, height, duration = ioutils.get_video_dimensions(video)
@@ -263,6 +266,13 @@ def motion_index(video, rois):
     for i, frame in enumerate(ioutils.stream_video(video)):
         masked = masks * frame.T[:, :, None] - prev_frame
         mi[i] = (masked * masked).sum(axis=0).sum(axis=0)
+
+    # Resample to specified frequency
+    fps = ioutils.get_video_fps(video)
+    if fps == 33 and output_hz == 1000:
+        # hack to avoid a weird 33/1000 resampling ratio
+        output_hz = 990
+    mi = resample(mi, fps, output_hz)
 
     # Normalise
     mi = mi - mi.min(axis=0)
