@@ -917,7 +917,8 @@ class Behaviour(ABC):
 
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
-            trial_starts = np.where((actions == label))[0]
+            #trial_starts = np.where((actions == label))[0]
+            trial_starts = np.where(np.bitwise_and(actions, label))[0]
 
             for start in trial_starts:
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
