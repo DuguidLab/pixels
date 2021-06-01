@@ -504,6 +504,21 @@ def get_video_dimensions(path):
     return width, height, frames
 
 
+def get_video_fps(path):
+    """
+    Get the frame rate of a video.
+
+    Parameters
+    ----------
+    path : str
+        File path to a video file.
+
+    """
+    video = cv2.VideoCapture(path)
+    fps = int(video.get(cv2.CAP_PROP_FPS))
+    return fps
+
+
 def stream_video(path):
     """
     Iterate over a video's frames.
