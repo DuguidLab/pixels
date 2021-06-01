@@ -826,7 +826,7 @@ class Behaviour(ABC):
             An event type value to specify which event to align the trials to.
 
         data : str, optional
-            One of 'spike_times' (default), 'behavioural', 'spike', or 'lfp'.
+            The data type to align.
 
         raw : bool, optional
             Whether to get raw, unprocessed data instead of processed and downsampled
@@ -854,7 +854,14 @@ class Behaviour(ABC):
         """
         data = data.lower()
 
-        data_options = ['behavioural', 'spike', 'spike_times', 'spike_rate', 'lfp']
+        data_options = [
+            'behavioural',  # Channels from behaviour TDMS file
+            'spike',        # Raw/downsampled channels from probe (AP)
+            'spike_times',  # List of spike times per unit
+            'spike_rate',   # Spike rate signals from convolved spike times
+            'lfp',          # Raw/downsampled channels from probe (LFP)
+            'motion_index', # Motion indexes per ROI from the video
+        ]
         if data not in data_options:
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
 
