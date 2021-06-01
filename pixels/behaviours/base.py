@@ -114,6 +114,7 @@ class Behaviour(ABC):
         self._spike_times_data = [None] * len(self.files)
         self._spike_rate_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
+        self._motion_index = [None] * len(self.files)
         self._load_lag()
 
     def set_cache(self, on):
@@ -524,7 +525,7 @@ class Behaviour(ABC):
                 # Get MIs
                 path = self.find_file(recording['camera_data']).with_suffix('.avi')
                 rec_rois = ses_rois[i]
-                rec_mi = signal.motion_index(path.as_posix(), rec_rois)
+                rec_mi = signal.motion_index(path.as_posix(), rec_rois, self.sample_rate)
 
                 # todo: set indexes to time and save as dataframe?
                 np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
@@ -564,16 +565,17 @@ class Behaviour(ABC):
         saved = getattr(self, attr)
         if saved[0] is None:
             for rec_num, recording in enumerate(self.files):
-                file_path = self.processed / recording[key]
-                if file_path.exists():
-                    if file_path.suffix == '.npy':
-                        saved[rec_num] = np.load(file_path)
-                    elif file_path.suffix == '.h5':
-                        saved[rec_num] = ioutils.read_hdf5(file_path)
-                else:
-                    msg = f"Could not find {attr[1:]} for recording {rec_num}."
-                    msg += f"\nFile should be at: {file_path}"
-                    raise PixelsError(msg)
+                if key in recording:
+                    file_path = self.processed / recording[key]
+                    if file_path.exists():
+                        if file_path.suffix == '.npy':
+                            saved[rec_num] = np.load(file_path)
+                        elif file_path.suffix == '.h5':
+                            saved[rec_num] = ioutils.read_hdf5(file_path)
+                    else:
+                        msg = f"Could not find {attr[1:]} for recording {rec_num}."
+                        msg += f"\nFile should be at: {file_path}"
+                        raise PixelsError(msg)
         return saved
 
     def get_action_labels(self):
@@ -588,6 +590,13 @@ class Behaviour(ABC):
         Returns the downsampled behaviour channels.
         """
         return self._get_processed_data("_behavioural_data", "behaviour_processed")
+
+    def get_motion_index_data(self):
+        """
+        Returns the motion indexes, either from self._motion_index if they have been
+        loaded already, or from file.
+        """
+        return self._get_processed_data("_motion_index", "motion_index")
 
     def get_spike_data(self):
         """
@@ -900,6 +909,12 @@ class Behaviour(ABC):
         half = (sample_rate * duration) // 2
 
         for rec_num in range(len(self.files)):
+            if values[rec_num] is None:
+                # This means that each recording is using the same piece of data for
+                # this data type, e.g. all recordings using motion indexes from a single
+                # video
+                break
+
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where((actions == label))[0]
