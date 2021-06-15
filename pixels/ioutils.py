@@ -443,7 +443,7 @@ def tdms_to_video(tdms_path, meta_path, output_path):
     process = (
         ffmpeg
         .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}', r=fps)
-        .output(output_path.as_posix(), pix_fmt='yuv420p', r=fps, crf=0, vcodec='libx264')
+        .output(output_path.as_posix(), pix_fmt='yuv420p', r=fps, crf=20, vcodec='libx264')
         .overwrite_output()
         .run_async(pipe_stdin=True)
     )
