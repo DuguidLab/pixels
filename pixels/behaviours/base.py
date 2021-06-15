@@ -3,6 +3,7 @@ This module provides a base class for experimental sessions that must be used as
 base for defining behaviour-specific processing.
 """
 
+from __future__ import annotations
 
 import functools
 import json
@@ -14,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from shutil import copyfile
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,6 +29,8 @@ from pixels import ioutils
 from pixels import signal
 from pixels.error import PixelsError
 
+if TYPE_CHECKING:
+    from typing import Optional
 
 BEHAVIOUR_HZ = 25000
 
@@ -147,7 +151,7 @@ class Behaviour(ABC):
         msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
         raise PixelsError(msg)
 
-    def find_file(self, name):
+    def find_file(self, name: str, copy: bool=True) -> Optional[pathlib.Path]:
         """
         Finds the specified file, looking for it in the processed folder, interim
         folder, and then raw folder in that order. If the the file is only found in the
@@ -157,6 +161,10 @@ class Behaviour(ABC):
         ----------
         name : str or pathlib.Path
             The basename of the file to be looked for.
+
+        copy : bool, optional
+            Normally files are copied from raw to interim. If this is False, raw files
+            will be decompressed in place but not copied to the interim folder.
 
         Returns
         -------
@@ -173,16 +181,23 @@ class Behaviour(ABC):
 
         raw = self.raw / name
         if raw.exists():
-            print(f"    {self.name}: Copying {name} to interim")
-            copyfile(raw, interim)
-            return interim
+            if copy:
+                print(f"    {self.name}: Copying {name} to interim")
+                copyfile(raw, interim)
+                return interim
+            return raw
 
         tar = raw.with_name(raw.name + '.tar.gz')
         if tar.exists():
-            print(f"    {self.name}: Extracting {tar.name} to interim")
+            if copy:
+                print(f"    {self.name}: Extracting {tar.name} to interim")
+                with tarfile.open(tar) as open_tar:
+                    open_tar.extractall(path=self.interim)
+                return interim
+            print(f"    {self.name}: Extracting {tar.name}")
             with tarfile.open(tar) as open_tar:
-                open_tar.extractall(path=self.interim)
-            return interim
+                open_tar.extractall(path=self.raw)
+            return raw
 
         return None
 
@@ -427,16 +442,13 @@ class Behaviour(ABC):
         """
         for recording in self.files:
             if 'camera_data' in recording:
-                path = self.find_file(recording['camera_data'])
-                path_out = path.with_suffix('.avi')
-                if path_out.exists() and not force:
-                    continue
-
-                ioutils.tdms_to_video(
-                    self.find_file(recording['camera_data']),
-                    self.find_file(recording['camera_meta']),
-                    path_out,
-                )
+                path_out = self.interim / recording['camera_data'].with_suffix('.avi')
+                if not path_out.exists() or force:
+                    ioutils.tdms_to_video(
+                        self.find_file(recording['camera_data'], copy=False),
+                        self.find_file(recording['camera_meta']),
+                        path_out,
+                    )
 
     def process_motion_tracking(self, config, create_labelled_video=False):
         """
@@ -453,7 +465,7 @@ class Behaviour(ABC):
 
         for recording in self.files:
             if 'camera_data' in recording:
-                video = self.find_file(recording['camera_data']).with_suffix('.avi')
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
                 if not video.exists():
                     raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
 
@@ -485,7 +497,10 @@ class Behaviour(ABC):
                     continue
 
                 # Load frame from video
-                video = self.find_file(recording['camera_data']).with_suffix('.avi')
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
+                if not video.exists():
+                    raise PixelsError(self.name + ": AVI video not found, run `extract_videos`")
+
                 frame = ioutils.load_video_frame(video.as_posix(), 100)
 
                 # Interactively draw ROI
@@ -513,7 +528,12 @@ class Behaviour(ABC):
             if 'camera_data' in recording:
                 roi_file = self.processed / f"motion_index_ROIs_{i}.pickle"
                 if not roi_file.exists():
-                    PixelsError(self.name + ": ROIs not drawn for motion index.")
+                    raise PixelsError(self.name + ": ROIs not drawn for motion index.")
+
+                # Also check videos are available
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
+                if not video.exists():
+                    raise PixelsError(self.name + ": AVI video not found in interim folder.")
 
                 with roi_file.open('rb') as fd:
                     ses_rois[i] = pickle.load(fd)
@@ -523,9 +543,10 @@ class Behaviour(ABC):
             if 'camera_data' in recording:
 
                 # Get MIs
-                path = self.find_file(recording['camera_data']).with_suffix('.avi')
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
                 rec_rois = ses_rois[i]
-                rec_mi = signal.motion_index(path.as_posix(), rec_rois, self.sample_rate)
+                rec_mi = signal.motion_index(video.as_posix(), rec_rois, self.sample_rate)
+                assert False, "ALIGNING NOT COMPLETE"
 
                 # todo: set indexes to time and save as dataframe?
                 np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
