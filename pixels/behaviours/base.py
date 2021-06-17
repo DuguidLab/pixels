@@ -438,7 +438,9 @@ class Behaviour(ABC):
 
     def extract_videos(self, force=False):
         """
-        Extract behavioural videos from TDMS to avi.
+        Extract behavioural videos from TDMS to avi. By default this will only run if
+        the video does not aleady exist. Pass `force=True` to extract the video anyway,
+        overwriting the destination file.
         """
         for recording in self.files:
             if 'camera_data' in recording:

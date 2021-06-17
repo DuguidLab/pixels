@@ -362,22 +362,26 @@ def _parse_tdms_metadata(meta_path):
     ts_high = np.uint64(meta["/'keys'/'IMAQdxTimestampHigh'"])
     ts_low = np.uint64(meta["/'keys'/'IMAQdxTimestampLow'"])
     stamps = ts_low + np.left_shift(ts_high, 32)
-    rate = round(np.diff(stamps / 1000000).mean())
+    rate = round(np.median(np.diff(stamps / 1000000)))
     print(f"    Frame rate is {rate} ms per frame, {1000/rate} fps")
 
+    # Indexes of the dropped frames
     if "/'frames'/'ind_skipped'" in meta:
+        # We add one here to account for 1-based indexing
+        # (I think. Compare with where actual_heights == 0)
         skipped = meta["/'frames'/'ind_skipped'"].dropna().size
         print(f"    Warning: video has skipped {skipped} frames.")
     else:
-        skipped = 0
+        skipped = None
 
     actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
-    height = int(actual_heights.max())
+    height = int(actual_heights.max())  # Largest height is presumably the real one
+    # The number of points with heights==0 should match skipped
     remainder = skipped - actual_heights[actual_heights != height].size
     duration = actual_heights.size - remainder
     fps = 1000 / rate
 
-    return fps, skipped, height, duration
+    return fps, height, duration
 
 
 def load_tdms_video(path, meta_path, frame=None):
@@ -397,7 +401,7 @@ def load_tdms_video(path, meta_path, frame=None):
         Read this one single frame rather than them all.
 
     """
-    fps, skipped, height, duration = _parse_tdms_metadata(meta_path)
+    fps, height, duration = _parse_tdms_metadata(meta_path)
 
     if frame is None:
         video = read_tdms(path)
@@ -432,7 +436,7 @@ def tdms_to_video(tdms_path, meta_path, output_path):
         extension of this path.
 
     """
-    fps, skipped, height, duration = _parse_tdms_metadata(meta_path)
+    fps, height, duration = _parse_tdms_metadata(meta_path)
 
     tdms_file = TdmsFile.open(tdms_path)
     group = tdms_file.groups()[0]
