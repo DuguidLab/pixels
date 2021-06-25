@@ -664,10 +664,6 @@ class Behaviour(ABC):
                 clust = np.squeeze(clust)
                 by_clust = {}
 
-                lag_start, _ = self._lag[rec_num]
-                if lag_start < 0:
-                    times = times + lag_start
-
                 for c in np.unique(clust):
                     by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
                 saved[rec_num]  = pd.concat(by_clust, axis=1, names=['unit'])
@@ -705,8 +701,16 @@ class Behaviour(ABC):
             rec_spikes = spikes[rec_num]
             rec_spikes = rec_spikes[selected_units[rec_num]]
             rec_trials = []
+
+            # Convert to ms (self.sample_rate)
             f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
             rec_spikes = rec_spikes / f
+
+            # Account for lag, in case the ephys recording was started before the
+            # behaviour
+            lag_start, _ = self._lag[rec_num]
+            if lag_start < 0:
+                rec_spikes = rec_spikes + lag_start
 
             for i, start in enumerate(trial_starts):
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
@@ -725,6 +729,7 @@ class Behaviour(ABC):
                     u_times = np.unique(u_times)  # remove double-counted spikes
                     udf = pd.DataFrame({int(unit): u_times})
                     tdf.append(udf)
+
                 if tdf:
                     tdfc = pd.concat(tdf, axis=1)
                     if rate:
