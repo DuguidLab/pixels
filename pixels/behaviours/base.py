@@ -940,7 +940,7 @@ class Behaviour(ABC):
         if not values or values[0] is None:
             raise PixelsError(f"align_trials: Could not get {data} data.")
 
-        trials = []
+        rec_trials = []
         # The logic here is that the action labels will always have a sample rate of
         # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
         # the action labels, so always give it 5 seconds to scan, then 'half' is used to
@@ -955,9 +955,9 @@ class Behaviour(ABC):
                 # video
                 break
 
+            trials = []
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
-            #trial_starts = np.where((actions == label))[0]
             trial_starts = np.where(np.bitwise_and(actions, label))[0]
 
             for start in trial_starts:
@@ -967,23 +967,30 @@ class Behaviour(ABC):
                 centre = start + centre[0]
                 centre = int(centre * sample_rate / self.sample_rate)
                 trial = values[rec_num][centre - half + 1:centre + half + 1]
+
+                if isinstance(trial, np.ndarray):
+                    trial = pd.DataFrame(trial)
                 trials.append(trial.reset_index(drop=True))
+
+            rec_trials.append(
+                pd.concat(trials, axis=1, keys=range(len(trials)), names=['trial', 'unit'])
+            )
 
         if not trials:
             raise PixelsError("Seems the action-event combo you asked for doesn't occur")
 
-        trials = pd.concat(
-            trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
+        ses_trials = pd.concat(
+            rec_trials, axis=1, copy=False, keys=range(len(trials)), names=["rec_num", "trial", "unit"]
         )
-        trials = trials.sort_index(level=1, axis=1)
-        trials = trials.reorder_levels(["unit", "trial"], axis=1)
+        ses_trials = ses_trials.sort_index(level=1, axis=1)
+        ses_trials = ses_trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
 
-        points = trials.shape[0]
+        points = ses_trials.shape[0]
         start = (- duration / 2) + (duration / points)
         timepoints = np.linspace(start, duration / 2, points)
-        trials['time'] = pd.Series(timepoints, index=trials.index)
-        trials = trials.set_index('time')
-        return trials
+        ses_trials['time'] = pd.Series(timepoints, index=ses_trials.index)
+        ses_trials = ses_trials.set_index('time')
+        return ses_trials
 
     def get_cluster_info(self):
         cluster_info = []
