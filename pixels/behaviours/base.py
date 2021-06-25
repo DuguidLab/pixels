@@ -145,11 +145,11 @@ class Behaviour(ABC):
         Load probe depth in um from file if it has been recorded.
         """
         depth_file = self.processed / 'depth.txt'
-        if depth_file.exists():
-            with depth_file.open() as fd:
-                return float(fd.read())
-        msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
-        raise PixelsError(msg)
+        if not depth_file.exists():
+            msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
+            raise PixelsError(msg)
+        with depth_file.open() as fd:
+            return [float(line) for line in fd.readlines()]
 
     def find_file(self, name: str, copy: bool=True) -> Optional[pathlib.Path]:
         """
@@ -779,10 +779,10 @@ class Behaviour(ABC):
 
                     # and that are within the specified depth range
                     if min_depth is not None:
-                        if probe_depth - unit_info['depth'] < min_depth:
+                        if probe_depth[rec_num] - unit_info['depth'] < min_depth:
                             continue
                     if max_depth is not None:
-                        if probe_depth - unit_info['depth'] > max_depth:
+                        if probe_depth[rec_num] - unit_info['depth'] > max_depth:
                             continue
 
                     # and that have the specified median spike widths
