@@ -785,8 +785,10 @@ class Behaviour(ABC):
             if widths is not None:
                 rec_widths = widths[widths['rec_num'] == rec_num]
 
-            for unit in rec_info['id']:
-                unit_info = rec_info.loc[rec_info['id'] == unit].iloc[0].to_dict()
+            id_key = 'id' if 'id' in rec_info else 'cluster_id'
+
+            for unit in rec_info[id_key]:
+                unit_info = rec_info.loc[rec_info[id_key] == unit].iloc[0].to_dict()
 
                 # we only want units that are in the specified group
                 if not group or unit_info[grouping] == group:
