@@ -504,7 +504,7 @@ class Behaviour(ABC):
                     raise PixelsError(self.name + ": AVI video not found, run `extract_videos`")
 
                 duration = ioutils.get_video_dimensions(video.as_posix())[2]
-                frame = ioutils.load_video_frame(video.as_posix(), duration // 2)
+                frame = ioutils.load_video_frame(video.as_posix(), duration // 4)
 
                 # Interactively draw ROI
                 roi = roi_helper.draw_polygon(frame, num_rois)
