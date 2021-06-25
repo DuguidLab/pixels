@@ -542,16 +542,25 @@ class Behaviour(ABC):
                     ses_rois[i] = pickle.load(fd)
 
         # Then do the extraction
-        for i, recording in enumerate(self.files):
+        for rec_num, recording in enumerate(self.files):
             if 'camera_data' in recording:
 
                 # Get MIs
+                raise NotImplementedError
                 video = self.interim / recording['camera_data'].with_suffix('.avi')
-                rec_rois = ses_rois[i]
+                rec_rois = ses_rois[rec_num]
                 rec_mi = signal.motion_index(video.as_posix(), rec_rois, self.sample_rate)
-                assert False, "ALIGNING NOT COMPLETE"
 
-                # todo: set indexes to time and save as dataframe?
+                # TODO: Use timestamps for real alignment
+                # Get initial timestamp of behavioural data
+                #behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
+                #for key in behavioural_data.keys():
+                #    if key.startswith("/'t0'/"):
+                #        t0 = behavioural_data[key][0]
+                #        break
+                #metadata = ioutils.read_tdms(self.find_file(recording['camera_meta']))
+                #timestamps = ioutils.tdms_parse_timestamps(metadata)
+
                 np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
 
     @abstractmethod
