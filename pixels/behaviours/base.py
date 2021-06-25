@@ -670,9 +670,7 @@ class Behaviour(ABC):
         return saved
 
     def _get_aligned_spike_times(
-        self, label, event, duration, group='good', min_depth=0, max_depth=None,
-        min_spike_width=None, max_spike_width=None, rate=False, sigma=None,
-        uncurated=False
+        self, label, event, duration, rate=False, sigma=None, units=None
     ):
         """
         Returns spike times for each unit within a given time window around an event.
@@ -680,10 +678,10 @@ class Behaviour(ABC):
         data in scripts.
         """
         action_labels = self.get_action_labels()
-        selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
-        )
         spikes = self._get_spike_times()
+
+        if units is None:
+            units = self.select_units()
 
         if rate:
             # pad ends with 1 second extra to remove edge effects from convolution
@@ -699,7 +697,7 @@ class Behaviour(ABC):
             trial_starts = np.where(np.bitwise_and(actions, label))[0]
 
             rec_spikes = spikes[rec_num]
-            rec_spikes = rec_spikes[selected_units[rec_num]]
+            rec_spikes = rec_spikes[units[rec_num]]
             rec_trials = []
 
             # Convert to ms (self.sample_rate)
@@ -754,12 +752,39 @@ class Behaviour(ABC):
 
         return trials
 
-    def filter_units(
+    def select_units(
         self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
         max_spike_width=None, uncurated=False
     ):
         """
-        Select units based on specified criteria.
+        Select units based on specified criteria. The output of this can be passed to
+        some other methods to apply those methods only to these units.
+
+        Parameters
+        ----------
+        group : str, optional
+            The group to which the units that are wanted are part of. One of: 'group',
+            'mua', 'noise. Default is 'good'.
+
+        min_depth : int, optional
+            (Only used when getting spike data). The minimum depth that units must be at
+            to be included. Default is 0 i.e. in the brain.
+
+        max_depth : int, optional
+            (Only used when getting spike data). The maximum depth that units must be at
+            to be included. Default is None i.e.  no maximum.
+
+        min_spike_width : int, optional
+            (Only used when getting spike data). The minimum median spike width that
+            units must have to be included. Default is None i.e. no minimum.
+
+        max_spike_width : int, optional
+            (Only used when getting spike data). The maximum median spike width that
+            units must have to be included. Default is None i.e. no maximum.
+
+        uncurated : bool, optional
+            Use uncurated units. Default: False.
+
         """
         cluster_info = self.get_cluster_info()
         selected_units = []
@@ -855,9 +880,8 @@ class Behaviour(ABC):
 
     @_cacheable
     def align_trials(
-        self, label, event, data='spike_times', raw=False, duration=1, min_depth=0,
-        max_depth=None, min_spike_width=None, max_spike_width=None, sigma=None,
-        uncurated=False
+        self, label, event, data='spike_times', raw=False, duration=1, sigma=None,
+        units=None
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -884,21 +908,13 @@ class Behaviour(ABC):
         duration : int/float, optional
             The length of time in seconds desired in the output. Default is 1 second.
 
-        min_depth : int, optional
-            (Only used when getting spike data). The minimum depth that units must be at
-            to be included. Default is 0 i.e. in the brain.
+        sigma : int, optional
+            Time in milliseconds of sigma of gaussian kernel to use when aligning firing
+            rates. Default is 50 ms.
 
-        max_depth : int, optional
-            (Only used when getting spike data). The maximum depth that units must be at
-            to be included. Default is None i.e.  no maximum.
-
-        min_spike_width : int, optional
-            (Only used when getting spike data). The minimum median spike width that
-            units must have to be included. Default is None i.e. no minimum.
-
-        max_spike_width : int, optional
-            (Only used when getting spike data). The maximum median spike width that
-            units must have to be included. Default is None i.e. no maximum.
+        units : list of lists of ints, optional
+            The output from self.select_units, used to only apply this method to a
+            selection of units.
 
         """
         data = data.lower()
@@ -918,9 +934,8 @@ class Behaviour(ABC):
             print(f"Aligning {data} to trials.")
             # we let a dedicated function handle aligning spike times
             return self._get_aligned_spike_times(
-                label, event, duration, min_depth=min_depth, max_depth=max_depth,
-                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
-                rate=data == "spike_rate", sigma=sigma, uncurated=uncurated
+                label, event, duration, rate=data == "spike_rate", sigma=sigma,
+                units=units
             )
 
         action_labels = self.get_action_labels()
@@ -1008,14 +1023,12 @@ class Behaviour(ABC):
         return cluster_info
 
     @_cacheable
-    def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
+    def get_spike_widths(self, units=None):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
         print("Calculating spike widths")
-        waveforms = self.get_spike_waveforms(
-            group=group, min_depth=min_depth, max_depth=max_depth
-        )
+        waveforms = self.get_spike_waveforms(units=units)
         widths = []
 
         for rec_num, recording in enumerate(self.files):
@@ -1037,18 +1050,14 @@ class Behaviour(ABC):
         return df
 
     @_cacheable
-    def get_spike_waveforms(
-        self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
-        max_spike_width=None, uncurated=False
-    ):
+    def get_spike_waveforms(self, units=None):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
-        selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
-        )
-
         waveforms = []
+
+        if units is None:
+            units = self.select_units()
 
         for rec_num, recording in enumerate(self.files):
             paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
@@ -1057,7 +1066,7 @@ class Behaviour(ABC):
             model = load_model(paramspy)
             rec_forms = {}
 
-            for unit in selected_units[rec_num]:
+            for unit in units[rec_num]:
                 # get the waveforms from only the best channel
                 spike_ids = model.get_cluster_spikes(unit)
                 best_chan = model.get_cluster_channels(unit)[0]
@@ -1083,8 +1092,7 @@ class Behaviour(ABC):
         self, label, event, win,
         bl_label=None, bl_event=None, bl_win=None,
         ss=20, CI=95, bs=10000,
-        group='good', min_depth=0, max_depth=None, min_spike_width=None, max_spike_width=None,
-        sigma=None, uncurated=False
+        units=None sigma=None,
     ):
         """
         Get the confidence intervals of the mean firing rates within a window aligned to
@@ -1119,20 +1127,20 @@ class Behaviour(ABC):
         bs : int, optional
             Number of bootstrapped samples. Default is 10000.
 
-        Remaining parameters are passed to `align_trials`.
+        units : list of lists of ints, optional
+            The output from self.select_units, used to only apply this method to a
+            selection of units.
+
+        sigma : int, optional
+            Time in milliseconds of sigma of gaussian kernel to use. Default is 50 ms.
+
         """
         if not isinstance(win, slice):
             raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
 
-        selected_units = self.filter_units(
-            group, min_depth, max_depth, min_spike_width, max_spike_width, uncurated
-        )
-
         duration = 2 * max(abs(win.start - 1), abs(win.stop))
         responses = self.align_trials(
-            label, event, 'spike_rate', duration=duration, min_depth=min_depth,
-            max_depth=max_depth, min_spike_width=min_spike_width,
-            max_spike_width=max_spike_width, sigma=sigma
+            label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
         )
         series = responses.index.values
         assert series[0] <= win.start < win.stop <= series[-1], "Check your slice, it's probably wrong"
@@ -1145,10 +1153,7 @@ class Behaviour(ABC):
             label = label if bl_label is None else bl_label
             event = event if bl_event is None else bl_event
             baselines = self.align_trials(
-                label, event, 'spike_rate', duration=duration,
-                min_depth=min_depth, max_depth=max_depth,
-                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
-                sigma=sigma
+                label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
             )
             series = baselines.index.values
             assert series[0] <= bl_win.start < bl_win.stop <= series[-1], "Check your bl_slice, it's probably wrong"
@@ -1160,7 +1165,7 @@ class Behaviour(ABC):
 
         for rec_num, recording in enumerate(self.files):
             rec_cis = {}
-            for unit in selected_units[rec_num]:
+            for unit in units[rec_num]:
                 u_resps = responses[rec_num][unit]
                 samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
                 medians = np.median(samples, axis=1)

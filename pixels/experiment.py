@@ -179,14 +179,29 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.process_motion_index()
 
-    def align_trials(self, *args, **kwargs):
+    def select_units(self, *args, **kwargs):
+        """
+        Select units based on specified criteria. The output of this can be passed to
+        some other methods to apply those methods only to these units.
+        """
+        units = []
+
+        for session in self.sessions:
+            units.append(session.select_units(*args, **kwargs))
+
+        return units
+
+    def align_trials(self, *args, units=None, **kwargs):
         """
         Get trials aligned to an event. Check behaviours.base.Behaviour.align_trials for
         usage information.
         """
         trials = []
-        for session in self.sessions:
-            trials.append(session.align_trials(*args, **kwargs))
+        for i, session in enumerate(self.sessions):
+            if units:
+                trials.append(session.align_trials(*args, units=units[i], **kwargs))
+            else:
+                trials.append(session.align_trials(*args, **kwargs))
 
         df = pd.concat(
             trials, axis=1, copy=False,
@@ -203,13 +218,17 @@ class Experiment:
         """
         return [s.get_cluster_info() for s in self.sessions]
 
-    def get_spike_widths(self, group='good', min_depth=0, max_depth=None):
+    def get_spike_widths(self, units=None):
         """
         Get the widths of spikes for units matching the specified criteria.
         """
-        widths = [
-            s.get_spike_widths(group, min_depth, max_depth) for s in self.sessions
-        ]
+        widths = []
+
+        for i, session in enumerate(self.sessons):
+            if units:
+                session.get_spike_widths(units[i])
+            else:
+                session.get_spike_widths()
 
         df = pd.concat(
             widths, axis=1, copy=False,
@@ -218,20 +237,17 @@ class Experiment:
         )
         return df
 
-    def get_spike_waveforms(
-        self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
-        max_spike_width=None
-    ):
+    def get_spike_waveforms(self, units=None):
         """
         Get the waveforms of spikes for units matching the specified criteria.
         """
-        waveforms = [
-            s.get_spike_waveforms(
-                group=group,
-                min_depth=min_depth, max_depth=max_depth,
-                min_spike_width=min_spike_width, max_spike_width=max_spike_width,
-            ) for s in self.sessions
-        ]
+        waveforms = []
+
+        for i, session in enumerate(self.sessons):
+            if units:
+                session.get_spike_waveforms(units[i])
+            else:
+                session.get_spike_waveforms()
 
         df = pd.concat(
             waveforms, axis=1, copy=False,
@@ -240,10 +256,18 @@ class Experiment:
         )
         return df
 
-    def get_aligned_spike_rate_CI(self, *args, **kwargs):
-        CIs = [
-            s.get_aligned_spike_rate_CI(*args, **kwargs) for s in self.sessions
-        ]
+    def get_aligned_spike_rate_CI(self, *args, units=None, **kwargs):
+        """
+        Get the confidence intervals of the mean firing rates within a window aligned to
+        a specified action label and event.
+        """
+        CIs = []
+
+        for i, session in enumerate(self.sessons):
+            if units:
+                session.get_aligned_spike_rate_CI(*args, units[i], **kwargs)
+            else:
+                session.get_aligned_spike_rate_CI(*args, **kwargs)
 
         df = pd.concat(
             CIs, axis=1, copy=False,
