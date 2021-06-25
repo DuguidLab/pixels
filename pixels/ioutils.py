@@ -356,13 +356,19 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     return sessions
 
 
+def tdms_parse_timestamps(metadata):
+    """Extract timestamps from video metadata."""
+    ts_high = np.uint64(metadata["/'keys'/'IMAQdxTimestampHigh'"])
+    ts_low = np.uint64(metadata["/'keys'/'IMAQdxTimestampLow'"])
+    stamps = ts_low + np.left_shift(ts_high, 32)
+    return stamps / 1000000
+
+
 def _parse_tdms_metadata(meta_path):
     meta = read_tdms(meta_path)
 
-    ts_high = np.uint64(meta["/'keys'/'IMAQdxTimestampHigh'"])
-    ts_low = np.uint64(meta["/'keys'/'IMAQdxTimestampLow'"])
-    stamps = ts_low + np.left_shift(ts_high, 32)
-    rate = round(np.median(np.diff(stamps / 1000000)))
+    stamps = tdms_parse_timestamps(meta)
+    rate = round(np.median(np.diff(stamps)))
     print(f"    Frame rate is {rate} ms per frame, {1000/rate} fps")
 
     # Indexes of the dropped frames
