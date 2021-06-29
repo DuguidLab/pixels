@@ -314,44 +314,48 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     for mouse in mouse_ids:
         mouse_sessions = list(raw_dir.glob(f'*{mouse}*'))
 
-        if mouse_sessions:
-            if meta_dir:
-                meta_file = meta_dir / (mouse + '.json')
-                with meta_file.open() as fd:
-                    mouse_meta = json.load(fd)
-                session_dates = [
-                    datetime.datetime.strptime(s.stem[0:6], '%y%m%d') for s in mouse_sessions
-                ]
+        if not mouse_sessions:
+            print(f'Found no sessions for: {mouse}')
+            continue
 
-                s = 0
-                for i, session in enumerate(mouse_meta):
-                    try:
-                        meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
-                    except TypeError:
-                        raise PixelsError(f"{mouse} session #{i}: 'date' not found in JSON.")
+        if not meta_dir:
+            # Do not collect metadata
+            for session in mouse_sessions:
+                sessions.append(dict(
+                    name=session.stem,
+                    metadata=None,
+                    data_dir=data_dir,
+                ))
+            continue
 
-                    for index, ses_date in enumerate(session_dates):
-                        if ses_date == meta_date and not session.get('exclude', False):
-                            s += 1
-                            sessions.append(dict(
-                                name=mouse_sessions[index].stem,
-                                metadata=session,
-                                data_dir=data_dir,
-                            ))
-                if s == 0:
-                    print(f'No session dates match between folders and metadata for: {mouse}')
+        meta_file = meta_dir / (mouse + '.json')
+        with meta_file.open() as fd:
+            mouse_meta = json.load(fd)
+        session_dates = [
+            datetime.datetime.strptime(s.stem[0:6], '%y%m%d') for s in mouse_sessions
+        ]
 
-            else:
-                # Do not collect metadata
-                for session in mouse_sessions:
+        if len(session_dates) != len(set(session_dates)):
+            raise PixelsError(f"{mouse}: Data folder dates must be unique.")
+
+        s = 0
+        for i, session in enumerate(mouse_meta):
+            try:
+                meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
+            except TypeError:
+                raise PixelsError(f"{mouse} session #{i}: 'date' not found in JSON.")
+
+            for index, ses_date in enumerate(session_dates):
+                if ses_date == meta_date and not session.get('exclude', False):
+                    s += 1
                     sessions.append(dict(
-                        name=session.stem,
-                        metadata=None,
+                        name=mouse_sessions[index].stem,
+                        metadata=session,
                         data_dir=data_dir,
                     ))
 
-        else:
-            print(f'Found no sessions for: {mouse}')
+        if s == 0:
+            print(f'No session dates match between folders and metadata for: {mouse}')
 
     return sessions
 
