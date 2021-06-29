@@ -224,11 +224,12 @@ class Experiment:
         """
         widths = []
 
-        for i, session in enumerate(self.sessons):
+        for i, session in enumerate(self.sessions):
             if units:
-                session.get_spike_widths(units[i])
+                ses_widths = session.get_spike_widths(units=units[i])
             else:
-                session.get_spike_widths()
+                ses_widths = session.get_spike_widths()
+            widths.append(ses_widths)
 
         df = pd.concat(
             widths, axis=1, copy=False,
@@ -243,11 +244,12 @@ class Experiment:
         """
         waveforms = []
 
-        for i, session in enumerate(self.sessons):
+        for i, session in enumerate(self.sessions):
             if units:
-                session.get_spike_waveforms(units[i])
+                ses_wfs = session.get_spike_waveforms(units=units[i])
             else:
-                session.get_spike_waveforms()
+                ses_wfs = session.get_spike_waveforms()
+            waveforms.append(ses_wfs)
 
         df = pd.concat(
             waveforms, axis=1, copy=False,
@@ -263,11 +265,12 @@ class Experiment:
         """
         CIs = []
 
-        for i, session in enumerate(self.sessons):
+        for i, session in enumerate(self.sessions):
             if units:
-                session.get_aligned_spike_rate_CI(*args, units[i], **kwargs)
+                ses_cis = session.get_aligned_spike_rate_CI(*args, units=units[i], **kwargs)
             else:
-                session.get_aligned_spike_rate_CI(*args, **kwargs)
+                ses_cis = session.get_aligned_spike_rate_CI(*args, **kwargs)
+            CIs.append(ses_cis)
 
         df = pd.concat(
             CIs, axis=1, copy=False,

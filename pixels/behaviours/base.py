@@ -38,7 +38,18 @@ np.random.seed(BEHAVIOUR_HZ)
 
 
 def _cacheable(method):
+    """
+    Methods with this decorator will have their output cached to disk so that future
+    calls with the same set of arguments will simply load the result from disk. However,
+    if the key word argument list contains `units` and it is not either `None` or an
+    instance of `SelectedUnits` then this is disabled.
+    """
     def func(*args, **kwargs):
+        if "units" in kwargs:
+            units = kwargs["units"]
+            if not isinstance(units, SelectedUnits) or not hasattr(units, "name"):
+                return method(*args, **kwargs)
+
         as_list = list(args) + list(kwargs.values())
         self = as_list.pop(0)
         if not self._use_cache:
@@ -54,6 +65,20 @@ def _cacheable(method):
             ioutils.write_hdf5(output, df)
         return df
     return func
+
+
+class SelectedUnits(list):
+    name: str
+    """
+    This is the return type of Behaviour.select_units, which is a list in every way
+    except that when represented as a string, it can return a name, if a `name`
+    attribute has been set on it. This allows methods that have had `units` passed to be
+    cached to file.
+    """
+    def __repr__(self):
+        if hasattr(self, "name"):
+            return self.name
+        return list.__repr__(self)
 
 
 class Behaviour(ABC):
@@ -754,7 +779,7 @@ class Behaviour(ABC):
 
     def select_units(
         self, group='good', min_depth=0, max_depth=None, min_spike_width=None,
-        max_spike_width=None, uncurated=False
+        max_spike_width=None, uncurated=False, name=None
     ):
         """
         Select units based on specified criteria. The output of this can be passed to
@@ -785,9 +810,18 @@ class Behaviour(ABC):
         uncurated : bool, optional
             Use uncurated units. Default: False.
 
+        name : str, optional
+            Give this selection of units a name. This allows the list of units to be
+            represented as a string, which enables caching. Future calls to cacheable
+            methods with a selection of units of the same name will read cached data
+            from disk. It is up to the user to ensure that the actual selection of units
+            is the same between uses of the same name.
+
         """
         cluster_info = self.get_cluster_info()
-        selected_units = []
+        selected_units = SelectedUnits()
+        if name is not None:
+            selected_units.name = name
 
         if min_depth is not None or max_depth is not None:
             probe_depth = self.get_probe_depth()
@@ -1089,10 +1123,11 @@ class Behaviour(ABC):
 
     @_cacheable
     def get_aligned_spike_rate_CI(
-        self, label, event, win,
-        bl_label=None, bl_event=None, bl_win=None,
+        self, label, event,
+        start=0.000, step=0.100, end=1.000,
+        bl_label=None, bl_event=None, bl_start=None, bl_end=0.000,
         ss=20, CI=95, bs=10000,
-        units=None sigma=None,
+        units=None, sigma=None,
     ):
         """
         Get the confidence intervals of the mean firing rates within a window aligned to
@@ -1109,13 +1144,18 @@ class Behaviour(ABC):
         event : Event int
             Event to align to, from a specific behaviour's Events class.
 
-        win : slice
-            Slice object with values in seconds used to extract the window data from
-            aligned firing rate data.
+        start : float, optional
+            Time in milliseconds relative to event for the left edge of the bins.
 
-        bl_label, bl_event, bl_win : as above, all optional
-            Equivalent to the above three parameters but for baselining data. By default
-            no baselining is performed.
+        step : float, optional
+            Time in milliseconds for the bin size.
+
+        end : float, optional
+            Time in milliseconds relative to event for the right edge of the bins.
+
+        bl_label, bl_event, bl_start, bl_end : as above, all optional
+            Equivalent to the above parameters but for baselining data. By default no
+            baselining is performed.
 
         ss : int, optional.
             Sample size of bootstrapped samples.
@@ -1135,43 +1175,62 @@ class Behaviour(ABC):
             Time in milliseconds of sigma of gaussian kernel to use. Default is 50 ms.
 
         """
-        if not isinstance(win, slice):
-            raise PixelsError("Third argument to get_aligned_spike_rate_CI should be a slice object")
-
-        duration = 2 * max(abs(win.start - 1), abs(win.stop))
+        # Get firing rates
+        duration = 2 * max(abs(start), abs(end))
         responses = self.align_trials(
             label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
         )
         series = responses.index.values
-        assert series[0] <= win.start < win.stop <= series[-1], "Check your slice, it's probably wrong"
-        responses = responses.loc[win].mean()
+        assert series[0] <= start < end <= series[-1]
 
-        if bl_win is not None:
-            if not isinstance(bl_win, slice):
-                raise PixelsError("bl_win arg for get_aligned_spike_rate_CI should be a slice object")
-            duration = 2 * max(abs(bl_win.start - 1), abs(bl_win.stop))
-            label = label if bl_label is None else bl_label
-            event = event if bl_event is None else bl_event
+        bins = (end - start) / step
+        assert bins.is_integer()
+        bin_responses = []
+
+        for i in range(int(bins)):
+            bin_start = start + i * step
+            bin_end = bin_start + step
+            bin_responses.append(responses.loc[bin_start : bin_end].mean())
+
+        averages = pd.concat(bin_responses, axis=1)
+
+        # Optionally baseline the firing rates
+        if bl_start is not None and bl_end is not None:
+            duration = 2 * max(abs(bl_start), abs(bl_end))
+
+            if bl_label is None:
+                bl_label = label
+            if bl_event is None:
+                bl_event = event
+
             baselines = self.align_trials(
-                label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
+                bl_label, bl_event, 'spike_rate', duration=duration, sigma=sigma, units=units
             )
             series = baselines.index.values
-            assert series[0] <= bl_win.start < bl_win.stop <= series[-1], "Check your bl_slice, it's probably wrong"
-            responses = responses - baselines.loc[bl_win].mean()
+            assert series[0] <= (bl_start + 0.001) < bl_end <= series[-1]
+            baseline = baselines.loc[bl_start : bl_end].mean()
+            for i in averages:
+                averages[i] = averages[i] - baseline
 
+        # Calculate the confidence intervals for each unit and bin
         lower = (100 - CI) / 2
         upper = 100 - lower
+        percentiles = [lower, 50, upper]
         cis = []
 
         for rec_num, recording in enumerate(self.files):
-            rec_cis = {}
+            rec_cis = []
             for unit in units[rec_num]:
-                u_resps = responses[rec_num][unit]
-                samples = np.array([np.random.choice(u_resps, size=ss) for i in range(bs)])
-                medians = np.median(samples, axis=1)
-                results = np.percentile(medians, [lower, 50, upper])
-                rec_cis[unit] = results
-            cis.append(pd.DataFrame(rec_cis, index=[lower, 50, upper]))
+                u_resps = averages.loc[rec_num, unit]
+                samples = np.array([
+                    [np.random.choice(u_resps[i], size=ss) for b in range(bs)]
+                    for i in u_resps
+                ])
+                medians = np.median(samples, axis=2)
+                results = np.percentile(medians, percentiles, axis=1)
+                rec_cis.append(pd.DataFrame(results))
+            cis.append(pd.concat(rec_cis, axis=1, keys=units[rec_num]))
 
-        df = pd.concat(cis, axis=1, keys=range(len(self.files)), names=['rec_num', 'unit'])
+        df = pd.concat(cis, axis=1, keys=range(len(self.files)), names=['rec_num', 'unit', 'bin'])
+        df.set_index(pd.Index(percentiles, name="percentile"), inplace=True)
         return df
