@@ -63,6 +63,11 @@ class LeverPush(Behaviour):
             3: missed tone
 
         """
+        if "/'Front_Reset'/'0'" in behavioural_data.columns:
+            # Drop front reset channel in case it is here - the push-pull protocol was
+            # likely used
+            del behavioural_data["/'Front_Reset'/'0'"]
+
         if "/'Laser_Signal'/'0'" in behavioural_data.columns:
             if len(behavioural_data.columns) != 8:
                 raise PixelsError("Unknown channel configuration. Cannot make action labels.")
