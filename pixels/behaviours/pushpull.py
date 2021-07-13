@@ -21,6 +21,11 @@ class ActionLabels:
     missed_push = 1 << 4
     missed_pull = 1 << 5
 
+    # These trials are a subset of rewarded_pu{sh,ll} with good MI onsets detected after
+    # tone, inserted into the action labels when doing MI analysis
+    rewarded_push_good_mi = 1 << 6
+    rewarded_pull_good_mi = 1 << 7
+
 
 class Events:
     back_sensor_open = 1 << 0
@@ -32,6 +37,9 @@ class Events:
     front_reset = 1 << 6
     tone_onset = 1 << 7
     tone_offset = 1 << 8
+
+    # This can be inserted later into the saved action labels
+    motion_index_onset = 1 << 9
 
 
 class PushPull(Behaviour):
