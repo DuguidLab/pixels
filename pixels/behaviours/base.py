@@ -1181,7 +1181,7 @@ class Behaviour(ABC):
             label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
         )
         series = responses.index.values
-        assert series[0] <= start < end <= series[-1]
+        assert series[0] <= start < end <= series[-1] + 0.001
 
         bins = (end - start) / step
         assert bins.is_integer()
