@@ -451,7 +451,16 @@ def tdms_to_video(tdms_path, meta_path, output_path):
     tdms_file = TdmsFile.open(tdms_path)
     group = tdms_file.groups()[0]
     channel = group.channels()[0]
-    width = int(len(channel) / (duration * height))
+
+    if height == 480:
+        # Normally we get duration from _parse_tdms_metadata, but on the occasion where
+        # the metadata file has not been saved for whatever reason - which has happened
+        # at least one time - if we know the height is 480 we can assume the width is
+        # 640 and calculate the duration from the video's size itself
+        width = 640
+        duration = len(channel) // (height * width)
+    else:
+        width = int(len(channel) / (duration * height))
     step = width * height
 
     process = (
