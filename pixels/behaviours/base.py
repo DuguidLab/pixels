@@ -829,9 +829,7 @@ class Behaviour(ABC):
         if min_spike_width == 0:
             min_spike_width = None
         if min_spike_width is not None or max_spike_width is not None:
-            widths = self.get_spike_widths(
-                group=group, min_depth=min_depth, max_depth=max_depth
-            )
+            widths = self.get_spike_widths()
         else:
             widths = None
 
