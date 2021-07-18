@@ -712,7 +712,7 @@ class Behaviour(ABC):
             # pad ends with 1 second extra to remove edge effects from convolution
             duration += 2
 
-        scan_duration = self.sample_rate * 5
+        scan_duration = self.sample_rate * 8
         half = int((self.sample_rate * duration) / 2)
         trials = []
 
@@ -759,7 +759,14 @@ class Behaviour(ABC):
                         tdfc = signal.convolve(tdfc, duration * 1000, sigma)
                     rec_trials.append(tdfc)
 
-            rec_df = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
+            if rec_trials:
+                rec_df = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
+            else:
+                rec_df = pd.DataFrame(
+                    {rec_num: np.nan},
+                    index=range(int(duration * 1000)),
+                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['trial', 'unit'])
+                )
             trials.append(rec_df)
 
         trials = pd.concat(trials, axis=1, keys=range(len(trials)), names=["rec_num", "trial", "unit"])
@@ -1181,7 +1188,7 @@ class Behaviour(ABC):
         series = responses.index.values
         assert series[0] <= start < end <= series[-1] + 0.001
 
-        bins = (end - start) / step
+        bins = round((end - start) / step, 10)  # Round in case of floating point recursive
         assert bins.is_integer()
         bin_responses = []
 
@@ -1227,7 +1234,16 @@ class Behaviour(ABC):
                 medians = np.median(samples, axis=2)
                 results = np.percentile(medians, percentiles, axis=1)
                 rec_cis.append(pd.DataFrame(results))
-            cis.append(pd.concat(rec_cis, axis=1, keys=units[rec_num]))
+
+            if rec_cis:
+                rec_df = pd.concat(rec_cis, axis=1, keys=units[rec_num])
+            else:
+                rec_df = pd.DataFrame(
+                    {rec_num: np.nan},
+                    index=range(3),
+                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['unit', 'bin'])
+                )
+            cis.append(rec_df)
 
         df = pd.concat(cis, axis=1, keys=range(len(self.files)), names=['rec_num', 'unit', 'bin'])
         df.set_index(pd.Index(percentiles, name="percentile"), inplace=True)
