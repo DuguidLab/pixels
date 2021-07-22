@@ -796,7 +796,7 @@ class Behaviour(ABC):
         ----------
         group : str, optional
             The group to which the units that are wanted are part of. One of: 'group',
-            'mua', 'noise. Default is 'good'.
+            'mua', 'noise' or None. Default is 'good'.
 
         min_depth : int, optional
             (Only used when getting spike data). The minimum depth that units must be at
@@ -1049,7 +1049,7 @@ class Behaviour(ABC):
     def get_cluster_info(self):
         cluster_info = []
 
-        for rec_num, recording in enumerate(self.files):
+        for rec_num in range(len(self.files)):
             info_file = self.processed / f'sorted_{rec_num}' / 'cluster_info.tsv'
             try:
                 info = pd.read_csv(info_file, sep='\t')
@@ -1113,7 +1113,16 @@ class Behaviour(ABC):
                 if u_waveforms is None:
                     raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
                 rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
-            waveforms.append(pd.concat(rec_forms, axis=1))
+
+            if rec_forms:
+                rec_df = pd.concat(rec_forms, axis=1)
+            else:
+                rec_df = pd.DataFrame(
+                    {rec_num: np.nan},
+                    index=range(82),
+                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['unit', 'spike'])
+                )
+            waveforms.append(rec_df)
 
         df = pd.concat(
             waveforms,
