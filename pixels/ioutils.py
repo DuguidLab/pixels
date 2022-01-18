@@ -279,6 +279,9 @@ def write_hdf5(path, df):
 
     """
     df.to_hdf(path, 'df', mode='w')
+    
+    print('HDF5 saved to ', path)
+
     return
 
 
@@ -308,7 +311,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
     """
     if not isinstance(mouse_ids, (list, tuple, set)):
         mouse_ids = [mouse_ids]
-    sessions = []
+    sessions = {}
     raw_dir = data_dir / 'raw'
 
     for mouse in mouse_ids:
@@ -321,8 +324,10 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
         if not meta_dir:
             # Do not collect metadata
             for session in mouse_sessions:
-                sessions.append(dict(
-                    name=session.stem,
+                name = session.stem
+                if name not in sessions:
+                    sessions[name] = []
+                sessions[name].append(dict(
                     metadata=None,
                     data_dir=data_dir,
                 ))
@@ -348,8 +353,10 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
             for index, ses_date in enumerate(session_dates):
                 if ses_date == meta_date and not session.get('exclude', False):
                     s += 1
-                    sessions.append(dict(
-                        name=mouse_sessions[index].stem,
+                    name = mouse_sessions[index].stem
+                    if name not in sessions:
+                        sessions[name] = []
+                    sessions[name].append(dict(
                         metadata=session,
                         data_dir=data_dir,
                     ))
@@ -382,7 +389,7 @@ def _parse_tdms_metadata(meta_path):
         skipped = meta["/'frames'/'ind_skipped'"].dropna().size
         print(f"    Warning: video has skipped {skipped} frames.")
     else:
-        skipped = None
+        skipped = 0
 
     actual_heights = meta["/'keys'/'IMAQdxActualHeight'"]
     height = int(actual_heights.max())  # Largest height is presumably the real one

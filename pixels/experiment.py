@@ -56,13 +56,15 @@ class Experiment:
         self.interim = self.data_dir / 'interim'
 
         self.sessions = []
+        sessions = ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir)
 
-        for session in ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir):
+        for name, metadata in sessions.items():
+            assert len(set(s['data_dir'] for s in metadata)) == 1, "All JSON items with same day must use same data folder."
             self.sessions.append(
                 behaviour(
-                    session['name'],
-                    metadata=session['metadata'],
-                    data_dir=session['data_dir'],
+                    name,
+                    metadata=[s['metadata'] for s in metadata],
+                    data_dir=metadata[0]['data_dir'],
                 )
             )
 
@@ -98,9 +100,7 @@ class Experiment:
             session.process_spikes()
 
     def sort_spikes(self):
-        """
-        Extract the spikes from raw spike data for all sessions.
-        """
+        """ Extract the spikes from raw spike data for all sessions.  """
         for i, session in enumerate(self.sessions):
             print(">>>>> Sorting spikes for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
