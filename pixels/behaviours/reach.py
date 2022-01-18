@@ -87,14 +87,22 @@ class Reach(Behaviour):
                 f"{self.name}: Mantis and Raspberry Pi behavioural data have different no. of trials"
             )
 
+        if len(led_offsets) < len(led_onsets):
+            # Last offset not found in tdms data?
+            last_trial = self.metadata['trials'][-1]
+            offset = led_offsets[-1] + (last_trial['end'] - last_trial['start']) * 1000
+            led_offsets = np.insert(led_offsets, -1, int(offset))
+            assert len(led_offsets) == len(led_onsets)
+
         # QA: Check that the cue durations (mostly) match between JSON and TDMS data
-        cue_durations_tdms = led_offsets - led_onsets
-        cue_durations_json = np.array(
-            [t['cue_duration'] for t in self.metadata['trials']]
-        ).round()
-        cue_durations_tdms = np.round(cue_durations_tdms / 100)
-        cue_durations_json = np.round(cue_durations_json / 100)
-        error = sum((cue_durations_tdms - cue_durations_json) != 0) / len(led_onsets)
+        # This compares them at 10s of milliseconds resolution
+        cue_durations_tdms = ((led_offsets - led_onsets) / 100).round()
+        cue_durations_json = (np.array(
+            [t['end'] - t['start'] for t in self.metadata['trials']]
+        ) * 10).round()
+        error = sum(
+            (cue_durations_tdms - cue_durations_json) != 0
+        ) / len(led_onsets)
         if error > 0.05:
             raise PixelsError(
                 f"{self.name}: Mantis and Raspberry Pi behavioural data have mismatching trial data."
