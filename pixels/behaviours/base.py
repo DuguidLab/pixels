@@ -3,7 +3,7 @@ This module provides a base class for experimental sessions that must be used as
 base for defining behaviour-specific processing.
 """
 
-from __future__ import annotations
+#from __future__ import annotations
 
 import functools
 import json
@@ -20,17 +20,17 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import probeinterface as pi
 import scipy.stats
-import spikeextractors as se
-import spikesorters as ss
-import spiketoolkit as st
+import spikeinterface as si
+import spikeinterface.extractors as se
+import spikeinterface.sorters as ss
 
 from pixels import ioutils
 from pixels import signal
 from pixels.error import PixelsError
 
-if TYPE_CHECKING:
-    from typing import Optional
+from typing import Optional
 
 BEHAVIOUR_HZ = 25000
 
@@ -176,7 +176,7 @@ class Behaviour(ABC):
         with depth_file.open() as fd:
             return [float(line) for line in fd.readlines()]
 
-    def find_file(self, name: str, copy: bool=True) -> Optional[pathlib.Path]:
+    def find_file(self, name: str, copy: bool=True) -> Optional[Path]:
         """
         Finds the specified file, looking for it in the processed folder, interim
         folder, and then raw folder in that order. If the the file is only found in the
@@ -356,13 +356,15 @@ class Behaviour(ABC):
             print("> Mapping spike data")
             data = ioutils.read_bin(data_file, num_chans)
 
-            #print("> Performing median subtraction across rows")  # TODO: fix
-            #data = signal.median_subtraction(data, axis=0)
-            #print("> Performing median subtraction across columns")
-            #data = signal.median_subtraction(data, axis=1)
-
             print(f"> Downsampling to {self.sample_rate} Hz")
             data = signal.resample(data, orig_rate, self.sample_rate)
+
+            # Ideally we would median subtract before downsampling, but that takes a
+            # very long time and is at risk of memory errors, so let's do it after.
+            print("> Performing median subtraction across rows")
+            data = signal.median_subtraction(data, axis=0)
+            print("> Performing median subtraction across columns")
+            data = signal.median_subtraction(data, axis=1)
 
             if self._lag[rec_num] is None:
                 self.sync_data(rec_num, sync_channel=data[:, -1])
@@ -411,22 +413,32 @@ class Behaviour(ABC):
         """
         Run kilosort spike sorting on raw spike data.
         """
-        for rec_num, recording in enumerate(self.files):
-            print(
-                f">>>>> Spike sorting recording {rec_num + 1} of {len(self.files)}"
-            )
+        streams = {}
 
-            output = self.processed / f'sorted_{rec_num}'
-            data_file = self.find_file(recording['spike_data'])
+        for rec_num, files in enumerate(self.files):
+            data_file = self.find_file(files['spike_data'])
+            assert data_file, f"Spike data not found for {files['spike_data']}."
+
+            stream_id = data_file.as_posix()[-12:-4]
+            if stream_id not in streams:
+                metadata = self.find_file(files['spike_meta'])
+                streams[stream_id] = metadata
+
+        for stream_num, stream in enumerate(streams.items()):
+            stream_id, metadata = stream
             try:
-                recording = se.SpikeGLXRecordingExtractor(file_path=data_file)
+                recording = se.SpikeGLXRecordingExtractor(self.interim, stream_id=stream_id)
             except ValueError as e:
                 raise PixelsError(
                     f"Did the raw data get fully copied to interim? Full error: {e}"
                 )
 
-            print(f"> Running kilosort")
-            ss.run_kilosort3(recording=recording, output_folder=output)
+            print("> Running kilosort")
+            output = self.processed / f'sorted_stream_{stream_num}'
+            concat_rec = si.concatenate_recordings([recording])
+            probe = pi.read_spikeglx(metadata.as_posix())
+            concat_rec = concat_rec.set_probe(probe)
+            ss.run_kilosort3(recording=concat_rec, output_folder=output)
 
     def assess_noise(self):
         """
