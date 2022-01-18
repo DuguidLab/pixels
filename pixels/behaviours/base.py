@@ -600,6 +600,87 @@ class Behaviour(ABC):
 
                 np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
 
+    def add_motion_index_action_label(
+        self, label: int, event: int, roi: int, value: int
+    ) -> None:
+        """
+        Add motion index onset times to the action labels as an event that can be
+        aligned to.
+
+        Paramters
+        ---------
+
+        label : int
+            The action following which the onset is expected to occur. A baseline level
+            of motion is determined from 5s preceding these actions, and the onset time
+            is searched for from this period up to event.
+
+        event : int
+            The event before which the onset is expected to occur. MI onsets are looked
+            for between the times of action (above) and this event.
+
+        roi : int
+            The index in the motion index vectors of the ROI to use to found onsets.
+
+        value : int
+            The value to use to represent the onset time event in the action labels i.e.
+            a value that is (or could be) part of the behaviour's `Events` enum for
+            representing movement onsets.
+
+        """
+        action_labels = self.get_action_labels()
+        motion_indexes = self.get_motion_index_data()
+
+        scan_duration = self.sample_rate * 10
+        half = scan_duration // 2
+
+        # We take 200 ms before the action begins as a short baseline period for each
+        # trial. The smallest standard deviation of all SDs of these baseline periods is
+        # used as a threshold to identify "clean" trials (`clean_threshold` below).
+        # Non-clean trials are trials where TODO
+        short_pre = int(0.2 * self.sample_rate)
+
+        for rec_num, recording in enumerate(self.files):
+            # Only recs with camera_data will have motion indexes
+            if 'camera_data' in recording:
+
+                # Get our numbers
+                assert motion_indexes[rec_num] is not None
+                num_rois = motion_indexes[rec_num].shape[1]
+                if num_rois - 1 < roi:
+                    raise PixelsError("ROI index is too high, there are only {num_rois} ROIs")
+                motion_index = motion_indexes[rec_num][:, roi]
+
+                actions = action_labels[rec_num][:, 0]
+                events = action_labels[rec_num][:, 1]
+                trial_starts = np.where(np.bitwise_and(actions, label))[0]
+
+                # Cut out our trials
+                trials = []
+                pre_cue_SDs = []
+
+                for start in trial_starts:
+                    event_latency = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
+                    if len(event_latency) == 0:
+                        raise PixelsError('Action labels probably miscalculated')
+                    trial = motion_index[start:start + event_latency[0]]
+                    trials.append(trial)
+
+                    pre_cue_SDs.append(np.std(motion_index[start - short_pre:start]))
+
+                clean_threshold = min(pre_cue_SDs)
+
+                onsets = []
+
+                for t in trials:
+                    movements = np.where(t > clean_threshold * 10)[0]
+                    if len(movements) == 0:
+                        raise PixelsError("Thresholding for detecting MI onset is inadequate")
+                    onsets.append(movements[0])
+
+                assert 0
+
+
     @abstractmethod
     def _extract_action_labels(self, behavioural_data):
         """
@@ -789,8 +870,10 @@ class Behaviour(ABC):
             # Set index to seconds and remove the padding 1 sec at each end
             points = trials.shape[0]
             start = (- duration / 2) + (duration / points)
-            timepoints = np.linspace(start, duration / 2, points)
-            trials['time'] = pd.Series(timepoints, index=trials.index)
+            # Having trouble with float values
+            #timepoints = np.linspace(start, duration / 2, points, dtype=np.float64)
+            timepoints = list(range(int(start * 1000), int(duration * 1000 / 2) + 1))
+            trials['time'] = pd.Series(timepoints, index=trials.index) / 1000
             trials = trials.set_index('time')
             trials = trials.iloc[self.sample_rate : - self.sample_rate]
 
@@ -1084,6 +1167,10 @@ class Behaviour(ABC):
 
         for rec_num, recording in enumerate(self.files):
             for unit in waveforms[rec_num].columns.get_level_values('unit').unique():
+                if unit == -1:
+                    # No units
+                    break
+
                 u_widths = []
                 u_spikes = waveforms[rec_num][unit]
                 for s in u_spikes:
@@ -1201,8 +1288,16 @@ class Behaviour(ABC):
             Time in milliseconds of sigma of gaussian kernel to use. Default is 50 ms.
 
         """
+        # Set timepoints to 3 decimal places (ms) to make things easier
+        start = round(start, 3)
+        step = round(step, 3)
+        end = round(end, 3)
+        if bl_start is not None:
+            bl_start = round(bl_start, 3)
+        bl_end = round(bl_end, 3)
+
         # Get firing rates
-        duration = 2 * max(abs(start), abs(end))
+        duration = round(2 * max(abs(start), abs(end)) + 0.002, 3)
         responses = self.align_trials(
             label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
         )
