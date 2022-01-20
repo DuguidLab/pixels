@@ -343,7 +343,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
         if len(session_dates) != len(set(session_dates)):
             raise PixelsError(f"{mouse}: Data folder dates must be unique.")
 
-        s = 0
+        included_sessions = set()
         for i, session in enumerate(mouse_meta):
             try:
                 meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
@@ -352,7 +352,6 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
 
             for index, ses_date in enumerate(session_dates):
                 if ses_date == meta_date and not session.get('exclude', False):
-                    s += 1
                     name = mouse_sessions[index].stem
                     if name not in sessions:
                         sessions[name] = []
@@ -360,8 +359,11 @@ def get_sessions(mouse_ids, data_dir, meta_dir):
                         metadata=session,
                         data_dir=data_dir,
                     ))
+                    included_sessions.add(name)
 
-        if s == 0:
+        if included_sessions:
+            print(f'{mouse} has {len(included_sessions)} sessions:', ", ".join(included_sessions))
+        else:
             print(f'No session dates match between folders and metadata for: {mouse}')
 
     return sessions
