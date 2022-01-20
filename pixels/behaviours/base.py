@@ -326,7 +326,7 @@ class Behaviour(ABC):
             behavioural_data.index = range(len(behavioural_data))
 
             print(f"> Extracting action labels")
-            self._action_labels[rec_num] = self._extract_action_labels(behavioural_data)
+            self._action_labels[rec_num] = self._extract_action_labels(rec_num, behavioural_data)
             output = self.processed / recording['action_labels']
             np.save(output, self._action_labels[rec_num])
             print(f">   Saved to: {output}")

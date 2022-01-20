@@ -54,7 +54,7 @@ class Events:
 
 class LeverPush(Behaviour):
 
-    def _extract_action_labels(self, behavioural_data, plot=False):
+    def _extract_action_labels(self, rec_num, behavioural_data, plot=False):
         """
         Create lever-push action labels. Key:
 

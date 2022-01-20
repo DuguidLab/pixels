@@ -61,7 +61,7 @@ _action_map = {
 
 
 class Reach(Behaviour):
-    def _preprocess_behaviour(self, behavioural_data):
+    def _preprocess_behaviour(self, rec_num, behavioural_data):
         # Correction for sessions where sync channel interfered with LED channel
         if behavioural_data["/'ReachLEDs'/'0'"].min() < -2:
             behavioural_data["/'ReachLEDs'/'0'"] = behavioural_data["/'ReachLEDs'/'0'"] \
@@ -80,28 +80,53 @@ class Reach(Behaviour):
         led_offsets = np.where((cue_leds[:-1] == 1) & (cue_leds[1:] == 0))[0]
         action_labels[led_onsets, 1] += Events.led_on
         action_labels[led_offsets, 1] += Events.led_off
+        metadata = self.metadata[rec_num]
 
         # QA: Check that the JSON and TDMS data have the same number of trials
-        if len(led_onsets) != len(self.metadata["trials"]):
-            raise PixelsError(
-                f"{self.name}: Mantis and Raspberry Pi behavioural data have different no. of trials"
-            )
+        if len(led_onsets) != len(metadata["trials"]):
+            # If they do not have the same number, perhaps the TDMS was stopped too early
+            meta_onsets = np.array([t["start"] for t in metadata["trials"]]) * 1000
+            meta_onsets = (meta_onsets - meta_onsets[0] + led_onsets[0]).astype(int)
+            if meta_onsets[-1] > len(cue_leds):
+                # TDMS stopped too early, continue anyway.
+                metadata["trials"].pop()
+            else:
+                # If you have come to debug and see why this error was raised, try:
+                # led_onsets - meta_onsets[:-1]  # This might show the problem
+                # Then just patch a fix here:
+                if self.name == "211027_VR49" and rec_num == 1:
+                    del metadata["trials"][52]  # Maybe cable fell out of DAQ input?
+                else:
+                    raise PixelsError(
+                        f"{self.name}: Mantis and Raspberry Pi behavioural "
+                        "data have different no. of trials"
+                    )
 
+        # QA: Last offset not found in tdms data?
         if len(led_offsets) < len(led_onsets):
-            # Last offset not found in tdms data?
-            last_trial = self.metadata['trials'][-1]
-            offset = led_offsets[-1] + (last_trial['end'] - last_trial['start']) * 1000
-            led_offsets = np.insert(led_offsets, -1, int(offset))
+            last_trial = self.metadata[rec_num]['trials'][-1]
+            offset = led_onsets[-1] + (last_trial['end'] - last_trial['start']) * 1000
+            led_offsets = np.append(led_offsets, int(offset))
             assert len(led_offsets) == len(led_onsets)
+
+        # QA: For some reason, sometimes the final trial doesn't include the final led-off
+        elif len(led_offsets) == len(led_onsets):
+            # Not sure how to deal with this if led_offsets and led_onsets differ in length
+            if len(metadata["trials"][-1]) == 1 and "start" in metadata["trials"][-1]:
+                # Remove it, because we would have to check the video to get all of the
+                # information about the trial, and it's too complicated.
+                metadata["trials"].pop()
+                led_onsets = led_onsets[:-1]
+                led_offsets = led_offsets[:-1]
 
         # QA: Check that the cue durations (mostly) match between JSON and TDMS data
         # This compares them at 10s of milliseconds resolution
-        cue_durations_tdms = ((led_offsets - led_onsets) / 100).round()
-        cue_durations_json = (np.array(
-            [t['end'] - t['start'] for t in self.metadata['trials']]
-        ) * 10).round()
+        cue_durations_tdms = (led_offsets - led_onsets) / 100
+        cue_durations_json = np.array(
+            [t['end'] - t['start'] for t in metadata['trials']]
+        ) * 10
         error = sum(
-            (cue_durations_tdms - cue_durations_json) != 0
+            (cue_durations_tdms - cue_durations_json).round() != 0
         ) / len(led_onsets)
         if error > 0.05:
             raise PixelsError(
@@ -110,13 +135,15 @@ class Reach(Behaviour):
 
         return behavioural_data, action_labels, led_onsets
 
-    def _extract_action_labels(self, behavioural_data, plot=False):
-        behavioural_data, action_labels, led_onsets = self._preprocess_behaviour(behavioural_data)
+    def _extract_action_labels(self, rec_num, behavioural_data, plot=False):
+        behavioural_data, action_labels, led_onsets = self._preprocess_behaviour(rec_num, behavioural_data)
 
-        for i, trial in enumerate(self.metadata["trials"]):
+        for i, trial in enumerate(self.metadata[rec_num]["trials"]):
             side = _side_map[trial["spout"]]
-            action = _action_map[trial["outcome"]]
-            action_labels[led_onsets[i], 0] += getattr(ActionLabels, f"{action}_{side}")
+            outcome = trial["outcome"]
+            if outcome in _action_map:
+                action = _action_map[trial["outcome"]]
+                action_labels[led_onsets[i], 0] += getattr(ActionLabels, f"{action}_{side}")
 
         if plot:
             plt.clf()
