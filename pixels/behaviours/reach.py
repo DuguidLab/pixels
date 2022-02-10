@@ -29,6 +29,9 @@ class ActionLabels:
     correct_right = 1 << 3
     incorrect_left = 1 << 4
     incorrect_right = 1 << 5
+    miss = miss_left | miss_right
+    correct = correct_left | correct_right
+    incorrect = incorrect_left | incorrect_right
 
     # visual-only experiments with naive mice
     naive_left_short = 1 << 6
@@ -89,10 +92,15 @@ class Reach(Behaviour):
             meta_onsets = (meta_onsets - meta_onsets[0] + led_onsets[0]).astype(int)
             if meta_onsets[-1] > len(cue_leds):
                 # TDMS stopped too early, continue anyway.
-                metadata["trials"].pop()
+                i = -1
+                while meta_onsets[i] > len(cue_leds):
+                    metadata["trials"].pop()
+                    i -= 1
+                assert len(led_onsets) == len(metadata["trials"])
             else:
                 # If you have come to debug and see why this error was raised, try:
-                # led_onsets - meta_onsets[:-1]  # This might show the problem
+                # led_onsets - meta_onsets[:len(led_onsets)]  # This might show the problem
+                # meta_onsets - led_onsets[:len(meta_onsets)]  # This might show the problem
                 # Then just patch a fix here:
                 if self.name == "211027_VR49" and rec_num == 1:
                     del metadata["trials"][52]  # Maybe cable fell out of DAQ input?

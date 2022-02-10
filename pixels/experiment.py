@@ -206,7 +206,7 @@ class Experiment:
         df = pd.concat(
             trials, axis=1, copy=False,
             keys=range(len(trials)),
-            names=["session", "rec_num", "unit", "trial"]
+            names=["session", "unit", "trial"]
         )
 
         return df
@@ -278,3 +278,9 @@ class Experiment:
             names=["session"]
         )
         return df
+
+    def get_session_by_name(self, name: str):
+        for session in self.sessions:
+            if session.name == name:
+                return session
+        raise PixelsError

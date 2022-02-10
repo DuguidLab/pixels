@@ -3,7 +3,7 @@ This module provides a base class for experimental sessions that must be used as
 base for defining behaviour-specific processing.
 """
 
-#from __future__ import annotations
+from __future__ import annotations
 
 import functools
 import json
@@ -30,7 +30,8 @@ from pixels import ioutils
 from pixels import signal
 from pixels.error import PixelsError
 
-from typing import Optional
+if TYPE_CHECKING:
+    from typing import Optional, Literal
 
 BEHAVIOUR_HZ = 25000
 
@@ -57,7 +58,7 @@ def _cacheable(method):
 
         as_list.insert(0, method.__name__)
         output = self.interim / 'cache' / ('_'.join(str(i) for i in as_list) + '.h5')
-        if output.exists():
+        if output.exists() and self._use_cache != "overwrite":
             df = ioutils.read_hdf5(output)
         else:
             df = method(*args, **kwargs)
@@ -121,6 +122,7 @@ class Behaviour(ABC):
         self._lfp_data = None
         self._lag = None
         self._use_cache = True
+        self._cluster_info = None
         self.drop_data()
 
         self.spike_meta = [
@@ -146,8 +148,12 @@ class Behaviour(ABC):
         self._motion_index = [None] * len(self.files)
         self._load_lag()
 
-    def set_cache(self, on):
-        self._use_cache = on
+    def set_cache(self, on: bool | Literal["overwrite"]) -> None:
+        if isinstance(on, bool):
+            self._use_cache = on
+        else:
+            assert on == "overwrite"
+            self._use_cache = on
 
     def _load_lag(self):
         """
@@ -767,25 +773,24 @@ class Behaviour(ABC):
         """
         saved = self._spike_times_data
         if saved[0] is None:
-            for rec_num, recording in enumerate(self.files):
-                times = self.processed / f'sorted_{rec_num}' / 'spike_times.npy'
-                clust = self.processed / f'sorted_{rec_num}' / 'spike_clusters.npy'
+            times = self.processed / f'sorted_stream_0' / 'spike_times.npy'
+            clust = self.processed / f'sorted_stream_0' / 'spike_clusters.npy'
 
-                try:
-                    times = np.load(times)
-                    clust = np.load(clust)
-                except FileNotFoundError:
-                    msg = ": Can't load spike times that haven't been extracted!"
-                    raise PixelsError(self.name + msg)
+            try:
+                times = np.load(times)
+                clust = np.load(clust)
+            except FileNotFoundError:
+                msg = ": Can't load spike times that haven't been extracted!"
+                raise PixelsError(self.name + msg)
 
-                times = np.squeeze(times)
-                clust = np.squeeze(clust)
-                by_clust = {}
+            times = np.squeeze(times)
+            clust = np.squeeze(clust)
+            by_clust = {}
 
-                for c in np.unique(clust):
-                    by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
-                saved[rec_num]  = pd.concat(by_clust, axis=1, names=['unit'])
-        return saved
+            for c in np.unique(clust):
+                by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
+            saved[0]  = pd.concat(by_clust, axis=1, names=['unit'])
+        return saved[0]
 
     def _get_aligned_spike_times(
         self, label, event, duration, rate=False, sigma=None, units=None
@@ -796,10 +801,13 @@ class Behaviour(ABC):
         data in scripts.
         """
         action_labels = self.get_action_labels()
-        spikes = self._get_spike_times()
 
         if units is None:
             units = self.select_units()
+
+        spikes = self._get_spike_times()[units]
+        # Convert to ms (self.sample_rate)
+        spikes /= int(self.spike_meta[0]['imSampRate']) / self.sample_rate
 
         if rate:
             # pad ends with 1 second extra to remove edge effects from convolution
@@ -807,20 +815,25 @@ class Behaviour(ABC):
 
         scan_duration = self.sample_rate * 8
         half = int((self.sample_rate * duration) / 2)
-        trials = []
+        cursor = 0  # In sample points
+        i = -1
 
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where(np.bitwise_and(actions, label))[0]
+            rec_trials = {}
 
-            rec_spikes = spikes[rec_num]
-            rec_spikes = rec_spikes[units[rec_num]]
-            rec_trials = []
-
-            # Convert to ms (self.sample_rate)
-            f = int(self.spike_meta[rec_num]['imSampRate']) / self.sample_rate
-            rec_spikes = rec_spikes / f
+            # Account for multiple raw data files
+            meta = self.spike_meta[rec_num]
+            samples = int(meta["fileSizeBytes"]) / int(meta["nSavedChans"]) / 2
+            assert samples.is_integer()
+            milliseconds = samples / 30
+            cursor_duration = cursor / 30
+            rec_spikes = spikes[
+                (cursor_duration <= spikes) & (spikes < (cursor_duration + milliseconds))
+            ] - cursor_duration
+            cursor += samples
 
             # Account for lag, in case the ephys recording was started before the
             # behaviour
@@ -828,7 +841,7 @@ class Behaviour(ABC):
             if lag_start < 0:
                 rec_spikes = rec_spikes + lag_start
 
-            for i, start in enumerate(trial_starts):
+            for i, start in enumerate(trial_starts, start=i + 1):
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
                 if len(centre) == 0:
                     raise PixelsError('Action labels probably miscalculated')
@@ -850,20 +863,18 @@ class Behaviour(ABC):
                     tdfc = pd.concat(tdf, axis=1)
                     if rate:
                         tdfc = signal.convolve(tdfc, duration * 1000, sigma)
-                    rec_trials.append(tdfc)
+                    rec_trials[i] = tdfc
 
-            if rec_trials:
-                rec_df = pd.concat(rec_trials, axis=1, keys=range(len(rec_trials)))
-            else:
-                rec_df = pd.DataFrame(
-                    {rec_num: np.nan},
-                    index=range(int(duration * 1000)),
-                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['trial', 'unit'])
-                )
-            trials.append(rec_df)
+        if rec_trials:
+            trials = pd.concat(rec_trials, axis=1, names=["trial", "unit"])
+        else:
+            trials = pd.DataFrame(
+                {rec_num: np.nan},
+                index=range(int(duration * 1000)),
+                columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['trial', 'unit'])
+            )
 
-        trials = pd.concat(trials, axis=1, keys=range(len(trials)), names=["rec_num", "trial", "unit"])
-        trials = trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
+        trials = trials.reorder_levels(["unit", "trial"], axis=1)
         trials = trials.sort_index(level=0, axis=1)
 
         if rate:
@@ -926,7 +937,7 @@ class Behaviour(ABC):
             selected_units.name = name
 
         if min_depth is not None or max_depth is not None:
-            probe_depth = self.get_probe_depth()
+            probe_depth = self.get_probe_depth()[0]
 
         if min_spike_width == 0:
             min_spike_width = None
@@ -935,44 +946,38 @@ class Behaviour(ABC):
         else:
             widths = None
 
+        rec_num = 0
+
+        id_key = 'id' if 'id' in cluster_info else 'cluster_id'
         grouping = 'KSLabel' if uncurated else 'group'
 
-        for rec_num in range(len(self.files)):
-            rec_info = cluster_info[rec_num]
-            rec_units = []
+        for unit in cluster_info[id_key]:
+            unit_info = cluster_info.loc[cluster_info[id_key] == unit].iloc[0].to_dict()
 
-            if widths is not None:
-                rec_widths = widths[widths['rec_num'] == rec_num]
+            # we only want units that are in the specified group
+            if not group or unit_info[grouping] == group:
 
-            id_key = 'id' if 'id' in rec_info else 'cluster_id'
+                # and that are within the specified depth range
+                if min_depth is not None:
+                    if probe_depth - unit_info['depth'] < min_depth:
+                        continue
+                if max_depth is not None:
+                    if probe_depth - unit_info['depth'] > max_depth:
+                        continue
 
-            for unit in rec_info[id_key]:
-                unit_info = rec_info.loc[rec_info[id_key] == unit].iloc[0].to_dict()
-
-                # we only want units that are in the specified group
-                if not group or unit_info[grouping] == group:
-
-                    # and that are within the specified depth range
-                    if min_depth is not None:
-                        if probe_depth[rec_num] - unit_info['depth'] < min_depth:
+                # and that have the specified median spike widths
+                if widths is not None:
+                    width = widths[widths['unit'] == unit]['median_ms']
+                    assert len(width.values) == 1
+                    if min_spike_width is not None:
+                        if width.values[0] < min_spike_width:
                             continue
-                    if max_depth is not None:
-                        if probe_depth[rec_num] - unit_info['depth'] > max_depth:
+                    if max_spike_width is not None:
+                        if width.values[0] > max_spike_width:
                             continue
 
-                    # and that have the specified median spike widths
-                    if widths is not None:
-                        width = rec_widths[rec_widths['unit'] == unit]['median_ms']
-                        assert len(width.values) == 1
-                        if min_spike_width is not None:
-                            if width.values[0] < min_spike_width:
-                                continue
-                        if max_spike_width is not None:
-                            if width.values[0] > max_spike_width:
-                                continue
+                selected_units.append(unit)
 
-                    rec_units.append(unit)
-            selected_units.append(rec_units)
         return selected_units
 
     def _get_neuro_raw(self, kind):
@@ -1055,11 +1060,11 @@ class Behaviour(ABC):
 
         data_options = [
             'behavioural',  # Channels from behaviour TDMS file
-            'spike',        # Raw/downsampled channels from probe (AP)
+            #'spike',        # Raw/downsampled channels from probe (AP)
             'spike_times',  # List of spike times per unit
             'spike_rate',   # Spike rate signals from convolved spike times
-            'lfp',          # Raw/downsampled channels from probe (LFP)
-            'motion_index', # Motion indexes per ROI from the video
+            #'lfp',          # Raw/downsampled channels from probe (LFP)
+            #'motion_index', # Motion indexes per ROI from the video
         ]
         if data not in data_options:
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
@@ -1089,7 +1094,7 @@ class Behaviour(ABC):
         if not values or values[0] is None:
             raise PixelsError(f"align_trials: Could not get {data} data.")
 
-        rec_trials = []
+        trials = []
         # The logic here is that the action labels will always have a sample rate of
         # self.sample_rate, whereas our data here may differ. 'duration' is used to scan
         # the action labels, so always give it 5 seconds to scan, then 'half' is used to
@@ -1104,7 +1109,6 @@ class Behaviour(ABC):
                 # video
                 break
 
-            trials = []
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where(np.bitwise_and(actions, label))[0]
@@ -1121,18 +1125,14 @@ class Behaviour(ABC):
                     trial = pd.DataFrame(trial)
                 trials.append(trial.reset_index(drop=True))
 
-            rec_trials.append(
-                pd.concat(trials, axis=1, keys=range(len(trials)), names=['trial', 'unit'])
-            )
-
         if not trials:
             raise PixelsError("Seems the action-event combo you asked for doesn't occur")
 
         ses_trials = pd.concat(
-            rec_trials, axis=1, copy=False, keys=range(len(trials)), names=["rec_num", "trial", "unit"]
+            trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
         )
         ses_trials = ses_trials.sort_index(level=1, axis=1)
-        ses_trials = ses_trials.reorder_levels(["rec_num", "unit", "trial"], axis=1)
+        ses_trials = ses_trials.reorder_levels(["unit", "trial"], axis=1)
 
         points = ses_trials.shape[0]
         start = (- duration / 2) + (duration / points)
@@ -1142,19 +1142,15 @@ class Behaviour(ABC):
         return ses_trials
 
     def get_cluster_info(self):
-        cluster_info = []
-
-        for rec_num in range(len(self.files)):
-            info_file = self.processed / f'sorted_{rec_num}' / 'cluster_info.tsv'
+        if self._cluster_info is None:
+            info_file = self.processed / f'sorted_stream_0' / 'cluster_info.tsv'
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
                 msg = ": Can't load cluster info. Did you sort this session yet?"
                 raise PixelsError(self.name + msg)
-
-            cluster_info.append(info)
-
-        return cluster_info
+            self._cluster_info = info
+        return self._cluster_info
 
     @_cacheable
     def get_spike_widths(self, units=None):
@@ -1165,25 +1161,20 @@ class Behaviour(ABC):
         waveforms = self.get_spike_waveforms(units=units)
         widths = []
 
-        for rec_num, recording in enumerate(self.files):
-            for unit in waveforms[rec_num].columns.get_level_values('unit').unique():
-                if unit == -1:
-                    # No units
-                    break
+        for unit in waveforms.columns.get_level_values('unit').unique():
+            u_widths = []
+            u_spikes = waveforms[unit]
+            for s in u_spikes:
+                spike = u_spikes[s]
+                trough = np.where(spike.values == min(spike))[0][0]
+                after = spike.values[trough:]
+                width = np.where(after == max(after))[0][0]
+                u_widths.append(width)
+            widths.append((unit, np.median(u_widths)))
 
-                u_widths = []
-                u_spikes = waveforms[rec_num][unit]
-                for s in u_spikes:
-                    spike = u_spikes[s]
-                    trough = np.where(spike.values == min(spike))[0][0]
-                    after = spike.values[trough:]
-                    width = np.where(after == max(after))[0][0]
-                    u_widths.append(width)
-                widths.append((rec_num, unit, np.median(u_widths)))
-
-        df = pd.DataFrame(widths, columns=["rec_num", "unit", "median_ms"])
+        df = pd.DataFrame(widths, columns=["unit", "median_ms"])
         # convert to ms from sample points
-        orig_rate = int(self.spike_meta[rec_num]['imSampRate'])
+        orig_rate = int(self.spike_meta[0]['imSampRate'])
         df['median_ms'] = 1000 * df['median_ms'] / orig_rate
         return df
 
@@ -1192,45 +1183,33 @@ class Behaviour(ABC):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
-        waveforms = []
-
         if units is None:
             units = self.select_units()
 
-        for rec_num, recording in enumerate(self.files):
-            paramspy = self.processed / f'sorted_{rec_num}' / 'params.py'
-            if not paramspy.exists():
-                raise PixelsError(f"{self.name}: params.py not found")
-            model = load_model(paramspy)
-            rec_forms = {}
+        paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+        if not paramspy.exists():
+            raise PixelsError(f"{self.name}: params.py not found")
+        model = load_model(paramspy)
+        rec_forms = {}
 
-            for unit in units[rec_num]:
-                # get the waveforms from only the best channel
-                spike_ids = model.get_cluster_spikes(unit)
-                best_chan = model.get_cluster_channels(unit)[0]
-                u_waveforms = model.get_waveforms(spike_ids, [best_chan])
-                if u_waveforms is None:
-                    raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
-                rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+        for unit in units:
+            # get the waveforms from only the best channel
+            spike_ids = model.get_cluster_spikes(unit)
+            best_chan = model.get_cluster_channels(unit)[0]
+            u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+            if u_waveforms is None:
+                raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
+            rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
 
-            if rec_forms:
-                rec_df = pd.concat(rec_forms, axis=1)
-            else:
-                rec_df = pd.DataFrame(
-                    {rec_num: np.nan},
-                    index=range(82),
-                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['unit', 'spike'])
-                )
-            waveforms.append(rec_df)
+        assert rec_forms
 
         df = pd.concat(
-            waveforms,
+            rec_forms,
             axis=1,
-            keys=range(len(self.files)),
-            names=['rec_num', 'unit', 'spike']
+            names=['unit', 'spike']
         )
         # convert indexes to ms
-        rate = 1000 / int(self.spike_meta[rec_num]['imSampRate'])
+        rate = 1000 / int(self.spike_meta[0]['imSampRate'])
         df.index = df.index * rate
         return df
 
