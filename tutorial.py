@@ -51,6 +51,8 @@ myexp.process_spikes()
 # This runs the spike sorting algorithm and outputs the results in a form usable by phy.
 myexp.sort_spikes()
 
+# TODO: deeplabcut is not yet handled
+
 # This extracts posture coordinates from TDMS videos using DeepLabCut
 config = '/path/to/this/behaviours/deeplabcut/config.yaml'
 myexp.process_motion_tracking(config)
@@ -85,7 +87,7 @@ behavioural_data = myexp[0].get_behavioural_data()
 hits = myexp.align_trials(
     ActionLabels.rewarded_push,  # This selects which trials we want
     Events.back_sensor_open,  # This selects what event we want them aligned to 
-    'behaviour'  # And this selects what kind of data we want
+    'behavioural'  # And this selects what kind of data we want
 )
 
 plt.figure()
