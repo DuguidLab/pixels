@@ -92,7 +92,7 @@ used by the pipeline:
 
     conda env create -n pixels numpy pandas nptdms scipy matplotlib opencv -c conda-forge
     conda activate pixels
-    pip install ffmpeg-python
+    pip install ffmpeg-python spikeinterface probeinterface
 
 This does not include deeplabcut and it's dependencies - see the deeplabcut
 docs for how to install.
