@@ -45,8 +45,11 @@ class ActionLabels:
 
 
 class Events:
-    led_on = 1
-    led_off = 2
+    led_on = 1 << 0
+    led_off = 1 << 1
+
+    # Timepoints determined using DeepLabCut
+    reach_onset = 1 << 2
 
 
 # These are used to convert the trial data into Actions and Events

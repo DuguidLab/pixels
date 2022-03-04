@@ -142,15 +142,24 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.extract_videos(force=force)
 
-    def process_motion_tracking(self, config, create_labelled_video=True):
+    def configure_motion_tracking(self, project):
         """
         Process motion tracking data either from raw camera data, or from
         previously-generated deeplabcut coordinate data, for all sessions.
         """
         for i, session in enumerate(self.sessions):
-            print(">>>>> Processing motion tracking for session {} ({} / {})"
+            print(">>>>> Configuring motion tracking for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.process_motion_tracking(config, create_labelled_video)
+            session.configure_motion_tracking(project)
+
+    def run_motion_tracking(self, *args, **kwargs):
+        """
+        Run motion tracking on camera data for all sessions.
+        """
+        for i, session in enumerate(self.sessions):
+            print(">>>>> Running motion tracking for session {} ({} / {})"
+                   .format(session.name, i + 1, len(self.sessions)))
+            session.run_motion_tracking(*args, **kwargs)
 
     def draw_motion_index_rois(self, num_rois=1):
         """

@@ -25,6 +25,7 @@ import scipy.stats
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
+from scipy import interpolate
 
 from pixels import ioutils
 from pixels import signal
@@ -146,6 +147,7 @@ class Behaviour(ABC):
         self._spike_rate_data = [None] * len(self.files)
         self._lfp_data = [None] * len(self.files)
         self._motion_index = [None] * len(self.files)
+        self._motion_tracking = [None] * len(self.files)
         self._load_lag()
 
     def set_cache(self, on: bool | Literal["overwrite"]) -> None:
@@ -486,38 +488,201 @@ class Behaviour(ABC):
         overwriting the destination file.
         """
         for recording in self.files:
-            if 'camera_data' in recording:
-                path_out = self.interim / recording['camera_data'].with_suffix('.avi')
+            for v, video in enumerate(recording.get('camera_data', [])):
+                path_out = self.interim / video.with_suffix('.avi')
                 if not path_out.exists() or force:
+                    meta = recording['camera_meta'][v]
                     ioutils.tdms_to_video(
-                        self.find_file(recording['camera_data'], copy=False),
-                        self.find_file(recording['camera_meta']),
+                        self.find_file(video, copy=False),
+                        self.find_file(meta),
                         path_out,
                     )
 
-    def process_motion_tracking(self, config, create_labelled_video=False):
+    def configure_motion_tracking(self, project: str) -> None:
         """
-        Run DeepLabCut motion tracking on behavioural videos.
+        Set up DLC project and add videos to it.
         """
         # bloated so imported when needed
         import deeplabcut  # pylint: disable=import-error
 
         self.extract_videos()
 
-        config = Path(config).expanduser()
-        if not config.exists():
-            raise PixelsError(f"Config at {config} not found.")
+        working_dir = self.data_dir / "processed" / "DLC"
+        matches = list(working_dir.glob(f"{project}*"))
+        if matches:
+            config = working_dir / matches[0] / "config.yaml"
+        else:
+            config = None
+
+        videos = []
+        for recording in self.files:
+            for video in recording.get('camera_data', []):
+                if project in video.stem:
+                    videos.append(self.interim / video.with_suffix('.avi'))
+
+        if not videos:
+            print(self.name, ": No matching videos for project:", project)
+            return
+
+        if config:
+            deeplabcut.add_new_videos(
+                config,
+                videos,
+                copy_videos=False,
+            )
+        else:
+            print(f"Config not found.")
+            reply = input("Create new project? [Y/n]")
+            if reply and reply[0].lower() == "n":
+                raise PixelsError("A DLC project is needed for motion tracking.")
+
+            deeplabcut.create_new_project(
+                project,
+                os.environ.get("USER"),
+                videos,
+                working_directory=working_dir,
+                copy_videos=False,
+            )
+            raise PixelsError("Raising an exception to stop operation. Check new config.")
+
+    def run_motion_tracking(
+        self,
+        project: str,
+        analyse: bool = True,
+        align: bool = True,
+        create_labelled_video: bool = False,
+        extract_outlier_frames: bool = False,
+    ):
+        """
+        Run DeepLabCut motion tracking on behavioural videos.
+
+        Parameters
+        ==========
+
+        project : str
+            The name of the DLC project.
+
+        create_labelled_video : bool
+            Generate a labelled video from existing DLC output.
+
+        """
+        # bloated so imported when needed
+        import deeplabcut  # pylint: disable=import-error
+
+        working_dir = self.data_dir / "processed" / "DLC"
+        matches = list(working_dir.glob(f"{project}*"))
+        if not matches:
+            raise PixelsError(f"DLC project {profile} not found.")
+        config = working_dir / matches[0] / "config.yaml"
+        output_dir = self.processed / "DLC"
+
+        videos = []
 
         for recording in self.files:
-            if 'camera_data' in recording:
-                video = self.interim / recording['camera_data'].with_suffix('.avi')
-                if not video.exists():
-                    raise PixelsError(f"Path {video} should exist but doesn't... discuss.")
+            for video in recording.get('camera_data', []):
+                if project in video.stem:
+                    avi = self.interim / video.with_suffix('.avi')
+                    if not avi.exists():
+                        raise PixelsError(f"Path {avi} should exist but doesn't... discuss.")
+                    videos.append(avi.as_posix())
 
-                deeplabcut.analyze_videos(config, [video])
-                deeplabcut.plot_trajectories(config, [video])
-                if create_labelled_video:
-                    deeplabcut.create_labeled_video(config, [video])
+        if analyse:
+            deeplabcut.analyze_videos(config, videos, destfolder=output_dir)
+            deeplabcut.plot_trajectories(config, videos, destfolder=output_dir)
+            deeplabcut.filterpredictions(config, videos, destfolder=output_dir)
+
+        if align:
+            for video in videos:
+                stem = Path(video).stem
+                try:
+                    result = next(output_dir.glob(f"{stem}*_filtered.h5"))
+                except StopIteration:
+                    raise PixelsError(f"{self.name}: DLC output not found.")
+
+                coords = pd.read_hdf(result)
+                meta_file = None
+                rec_num = None
+
+                for rec_num, recording in enumerate(self.files):
+                    for meta in recording.get('camera_meta', []):
+                        if stem in meta.as_posix():
+                            meta_file = meta
+                            break
+                    if meta_file:
+                        break
+
+                assert meta_file and rec_num is not None
+
+                metadata = ioutils.read_tdms(self.find_file(meta_file))
+                aligned = self._align_dlc_coords(rec_num, metadata, coords)
+
+                ioutils.write_hdf5(
+                    self.processed / f"motion_tracking_{rec_num}.h5",
+                    aligned,
+                )
+
+        if extract_outlier_frames:
+            deeplabcut.extract_outlier_frames(
+                config, videos, destfolder=output_dir, automatic=True,
+            )
+
+        if create_labelled_video:
+            deeplabcut.create_labeled_video(
+                config, videos, destfolder=output_dir, draw_skeleton=True,
+            )
+
+    def _align_dlc_coords(self, rec_num, metadata, coords):
+        recording = self.files[rec_num]
+        behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
+
+        # ignore any columns that have Nans; these just contain settings
+        for col in behavioural_data:
+            if behavioural_data[col].isnull().values.any():
+                behavioural_data.drop(col, axis=1, inplace=True)
+
+        behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
+        behavioural_data.iloc[:len(behav_array), :] = behav_array
+        behavioural_data = behavioural_data[:len(behav_array)]
+
+        trigger = signal.binarise(behavioural_data["/'CamFrames'/'0'"]).values
+        onsets = np.where((trigger[:-1] == 1) & (trigger[1:] == 0))[0]
+        timestamps = ioutils.tdms_parse_timestamps(metadata)
+        assert len(onsets) == len(timestamps) == len(coords)
+
+        # The last frame gets delayed a bit, so ignoring it, are the timestamp diffs
+        # fixed?
+        assert len(np.unique(np.diff(onsets[:-1]))) == 1
+
+        if self._lag[rec_num] is None:
+            self.sync_data(
+                rec_num,
+                behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values,
+            )
+        lag_start, lag_end = self._lag[rec_num]
+        no_lag = slice(max(lag_start, 0), -1-max(lag_end, 0))
+
+        xs = np.arange(0, len(trigger))
+        scorer = coords.columns.get_level_values("scorer")[0]
+        bodyparts = coords.columns.get_level_values("bodyparts").unique()
+        likelihood_threshold = 0.8
+        processed = {}
+        action_labels = self.get_action_labels()[rec_num]
+
+        for label in bodyparts:
+            label_coords = coords[scorer][label]
+            bads = label_coords["likelihood"] < likelihood_threshold
+            label_coords["x"][bads] = 0
+            label_coords["y"][bads] = 480
+            tck_x = interpolate.splrep(onsets, label_coords["x"])
+            ynew_x = interpolate.splev(xs, tck_x)
+            tck_y = interpolate.splrep(onsets, label_coords["y"])
+            ynew_y = interpolate.splev(xs, tck_y)
+            data = np.array([ynew_x[no_lag], ynew_y[no_lag]]).T
+            assert action_labels.shape == data.shape
+            processed[label] = pd.DataFrame(data, columns=["x", "y"])
+
+        df = pd.concat(processed, axis=1)
+        return pd.concat({scorer: df}, axis=1, names=coords.columns.names)
 
     def draw_motion_index_rois(self, num_rois=1):
         """
@@ -754,6 +919,13 @@ class Behaviour(ABC):
         loaded already, or from file.
         """
         return self._get_processed_data("_motion_index", "motion_index")
+
+    def get_motion_tracking_data(self):
+        """
+        Returns the DLC coordinates from self._motion_tracking if they have been loaded
+        already, or from file.
+        """
+        return self._get_processed_data("_motion_tracking", "motion_tracking")
 
     def get_spike_data(self):
         """
@@ -1065,6 +1237,7 @@ class Behaviour(ABC):
             'spike_rate',   # Spike rate signals from convolved spike times
             #'lfp',          # Raw/downsampled channels from probe (LFP)
             #'motion_index', # Motion indexes per ROI from the video
+            'motion_tracking', # Motion tracking coordinates from DLC
         ]
         if data not in data_options:
             raise PixelsError(f"align_trials: 'data' should be one of: {data_options}")
@@ -1128,11 +1301,20 @@ class Behaviour(ABC):
         if not trials:
             raise PixelsError("Seems the action-event combo you asked for doesn't occur")
 
-        ses_trials = pd.concat(
-            trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
-        )
-        ses_trials = ses_trials.sort_index(level=1, axis=1)
-        ses_trials = ses_trials.reorder_levels(["unit", "trial"], axis=1)
+        if data == "motion_tracking":
+            ses_trials = pd.concat(
+                trials,
+                axis=1,
+                copy=False,
+                keys=range(len(trials)),
+                names=["trial"] + trials[0].columns.names
+            )
+        else:
+            ses_trials = pd.concat(
+                trials, axis=1, copy=False, keys=range(len(trials)), names=["trial", "unit"]
+            )
+            ses_trials = ses_trials.sort_index(level=1, axis=1)
+            ses_trials = ses_trials.reorder_levels(["unit", "trial"], axis=1)
 
         points = ses_trials.shape[0]
         start = (- duration / 2) + (duration / points)
