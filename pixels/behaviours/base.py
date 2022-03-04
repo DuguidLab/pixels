@@ -467,10 +467,10 @@ class Behaviour(ABC):
             # sample some points -- it takes too long to use them all
             length = data.shape[0]
             points = np.random.choice(range(length), length // 60, replace=False)
-            sample = data[points, :]
+            sample = data[points, :-1]
             median = np.median(sample, axis=1)
             SDs = []
-            for i in range(385):
+            for i in range(384):
                 SDs.append(np.std(sample[:, i] - median))
 
             results = dict(
@@ -1456,7 +1456,6 @@ class Behaviour(ABC):
         if bl_start is not None:
             bl_start = round(bl_start, 3)
         bl_end = round(bl_end, 3)
-
         # Get firing rates
         duration = round(2 * max(abs(start), abs(end)) + 0.002, 3)
         responses = self.align_trials(
@@ -1500,28 +1499,27 @@ class Behaviour(ABC):
         percentiles = [lower, 50, upper]
         cis = []
 
-        for rec_num, recording in enumerate(self.files):
-            rec_cis = []
-            for unit in units[rec_num]:
-                u_resps = averages.loc[rec_num, unit]
-                samples = np.array([
-                    [np.random.choice(u_resps[i], size=ss) for b in range(bs)]
-                    for i in u_resps
-                ])
-                medians = np.median(samples, axis=2)
-                results = np.percentile(medians, percentiles, axis=1)
-                rec_cis.append(pd.DataFrame(results))
+        rec_cis = []
+        for unit in units:
+            u_resps = averages.loc[unit]
+            samples = np.array([
+                [np.random.choice(u_resps[i], size=ss) for b in range(bs)]
+                for i in u_resps
+            ])
+            medians = np.median(samples, axis=2)
+            results = np.percentile(medians, percentiles, axis=1)
+            rec_cis.append(pd.DataFrame(results))
 
-            if rec_cis:
-                rec_df = pd.concat(rec_cis, axis=1, keys=units[rec_num])
-            else:
-                rec_df = pd.DataFrame(
-                    {rec_num: np.nan},
-                    index=range(3),
-                    columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['unit', 'bin'])
-                )
-            cis.append(rec_df)
+        if rec_cis:
+            rec_df = pd.concat(rec_cis, axis=1, keys=units)
+        else:
+            rec_df = pd.DataFrame(
+                {rec_num: np.nan},
+                index=range(3),
+                columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['unit', 'bin'])
+            )
+        cis.append(rec_df)
 
-        df = pd.concat(cis, axis=1, keys=range(len(self.files)), names=['rec_num', 'unit', 'bin'])
+        df = pd.concat(cis, axis=1, names=['unit', 'bin'])
         df.set_index(pd.Index(percentiles, name="percentile"), inplace=True)
         return df
