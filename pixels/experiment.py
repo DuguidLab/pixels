@@ -212,11 +212,19 @@ class Experiment:
             else:
                 trials.append(session.align_trials(*args, **kwargs))
 
-        df = pd.concat(
-            trials, axis=1, copy=False,
-            keys=range(len(trials)),
-            names=["session", "unit", "trial"]
-        )
+        if "motion_tracking" in args:
+            df = pd.concat(
+                trials, axis=1, copy=False,
+                keys=range(len(trials)),
+                names=["session", "trial", "scorer", "bodyparts", "coords"]
+            )
+
+        else:
+            df = pd.concat(
+                trials, axis=1, copy=False,
+                keys=range(len(trials)),
+                names=["session", "unit", "trial"]
+            )
 
         return df
 

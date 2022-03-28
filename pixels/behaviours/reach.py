@@ -116,11 +116,18 @@ class Reach(Behaviour):
         # QA: Last offset not found in tdms data?
         if len(led_offsets) < len(led_onsets):
             last_trial = self.metadata[rec_num]['trials'][-1]
-            offset = led_onsets[-1] + (last_trial['end'] - last_trial['start']) * 1000
-            led_offsets = np.append(led_offsets, int(offset))
+            if "end" in last_trial:
+                # Take known offset from metadata
+                offset = led_onsets[-1] + (last_trial['end'] - last_trial['start']) * 1000
+                led_offsets = np.append(led_offsets, int(offset))
+            else:
+                # If not possible, just remove last onset
+                led_onsets = led_onsets[:-1]
+                metadata["trials"].pop()
             assert len(led_offsets) == len(led_onsets)
 
-        # QA: For some reason, sometimes the final trial doesn't include the final led-off
+        # QA: For some reason, sometimes the final trial metadata doesn't include the
+        # final led-off even though it is detectable in the TDMS data.
         elif len(led_offsets) == len(led_onsets):
             # Not sure how to deal with this if led_offsets and led_onsets differ in length
             if len(metadata["trials"][-1]) == 1 and "start" in metadata["trials"][-1]:
