@@ -146,7 +146,7 @@ def find_sync_lag(array1, array2, plot=False):
 
     """
     length = min(len(array1), len(array2)) // 2
-    length = min(length, 120000)
+    length = min(length, 300000)
 
     array1 = array1.squeeze()
     array2 = array2.squeeze()
