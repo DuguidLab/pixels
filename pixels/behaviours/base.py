@@ -355,6 +355,10 @@ class Behaviour(ABC):
             print(
                 f">>>>> Processing spike data for recording {rec_num + 1} of {len(self.files)}"
             )
+            output = self.processed / recording['spike_processed']
+
+            if output.exists():
+                continue
 
             data_file = self.find_file(recording['spike_data'])
             orig_rate = self.spike_meta[rec_num]['imSampRate']
@@ -377,7 +381,6 @@ class Behaviour(ABC):
                 self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
-            output = self.processed / recording['spike_processed']
             print(f"> Saving data to {output}")
             if lag_end < 0:
                 data = data[:lag_end]
