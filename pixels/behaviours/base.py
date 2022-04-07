@@ -1031,12 +1031,12 @@ class Behaviour(ABC):
         half = int((self.sample_rate * duration) / 2)
         cursor = 0  # In sample points
         i = -1
+        rec_trials = {}
 
         for rec_num in range(len(self.files)):
             actions = action_labels[rec_num][:, 0]
             events = action_labels[rec_num][:, 1]
             trial_starts = np.where(np.bitwise_and(actions, label))[0]
-            rec_trials = {}
 
             # Account for multiple raw data files
             meta = self.spike_meta[rec_num]
@@ -1073,21 +1073,13 @@ class Behaviour(ABC):
                     udf = pd.DataFrame({int(unit): u_times})
                     tdf.append(udf)
 
-                if tdf:
-                    tdfc = pd.concat(tdf, axis=1)
-                    if rate:
-                        tdfc = signal.convolve(tdfc, duration * 1000, sigma)
-                    rec_trials[i] = tdfc
+                assert len(tdf) == len(units)
+                tdfc = pd.concat(tdf, axis=1)
+                if rate:
+                    tdfc = signal.convolve(tdfc, duration * 1000, sigma)
+                rec_trials[i] = tdfc
 
-        if rec_trials:
-            trials = pd.concat(rec_trials, axis=1, names=["trial", "unit"])
-        else:
-            trials = pd.DataFrame(
-                {rec_num: np.nan},
-                index=range(int(duration * 1000)),
-                columns=pd.MultiIndex.from_arrays([[-1], [-1]], names=['trial', 'unit'])
-            )
-
+        trials = pd.concat(rec_trials, axis=1, names=["trial", "unit"])
         trials = trials.reorder_levels(["unit", "trial"], axis=1)
         trials = trials.sort_index(level=0, axis=1)
 
@@ -1326,6 +1318,9 @@ class Behaviour(ABC):
         # index data.
         scan_duration = self.sample_rate * 10
         half = (sample_rate * duration) // 2
+        if isinstance(half, float):
+            assert half.is_integer()  # In case duration is a float < 1
+            half = int(half)
 
         for rec_num in range(len(self.files)):
             if values[rec_num] is None:
