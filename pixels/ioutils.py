@@ -345,6 +345,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir, session_date_fmt):
         meta_file = meta_dir / (mouse + '.json')
         with meta_file.open() as fd:
             mouse_meta = json.load(fd)
+        # az: change date format into yyyymmdd
         session_dates = [
             datetime.datetime.strptime(s.stem.split("_")[0], session_date_fmt) for s in mouse_sessions
         ]
