@@ -2,6 +2,9 @@
 This module provides reach task specific operations.
 """
 
+from __future__ import annotations
+
+import pickle
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +13,7 @@ import pandas as pd
 from reach.session import Outcomes, Targets
 
 from pixels import Experiment, PixelsError
-from pixels import signal
+from pixels import signal, ioutils
 from pixels.behaviours import Behaviour
 
 
@@ -32,6 +35,8 @@ class ActionLabels:
     miss = miss_left | miss_right
     correct = correct_left | correct_right
     incorrect = incorrect_left | incorrect_right
+    left = miss_left | correct_left | incorrect_left
+    right = miss_right | correct_right | incorrect_right
 
     # visual-only experiments with naive mice
     naive_left_short = 1 << 6
@@ -49,7 +54,9 @@ class Events:
     led_off = 1 << 1
 
     # Timepoints determined using DeepLabCut
-    reach_onset = 1 << 2
+    reach_onset_left = 1 << 2
+    reach_onset_right = 1 << 3
+    reach_onset = reach_onset_left | reach_onset_right
 
 
 # These are used to convert the trial data into Actions and Events
@@ -178,6 +185,182 @@ class Reach(Behaviour):
 
         return action_labels
 
+    def draw_slit_thresholds(self, project: str, force: bool = False):
+        """
+        Draw lines on the slits using EasyROI. If ROIs already exist, skip.
+
+        Parameters
+        ==========
+        project : str
+            The DLC project i.e. name/prefix of the camera.
+
+        force : bool
+            If true, we will draw new lines even if the output file exists.
+
+        """
+        # Only needed for this method
+        import cv2
+        import EasyROI
+
+        output = self.processed / f"slit_thresholds_{project}.pickle"
+
+        if output.exists() and not force:
+            print(self.name, "- slits drawn already.")
+            return
+
+        # Let's take the average between the first and last frames of the whole session.
+        videos = []
+
+        for recording in self.files:
+            for v, video in enumerate(recording.get("camera_data", [])):
+                if project in video.stem:
+                    avi = self.interim / video.with_suffix('.avi')
+                    if not avi.exists():
+                        meta = recording['camera_meta'][v]
+                        ioutils.tdms_to_video(
+                            self.find_file(video, copy=False),
+                            self.find_file(meta),
+                            avi,
+                        )
+                    if not avi.exists():
+                        raise PixelsError(f"Path {avi} should exist but doesn't... discuss.")
+                    videos.append(avi.as_posix())
+
+        if not videos:
+            raise PixelsError("No videos were found to draw slits on.")
+
+        first_frame = ioutils.load_video_frame(videos[0], 1)
+        last_duration = ioutils.get_video_dimensions(videos[-1])[2]
+        last_frame = ioutils.load_video_frame(videos[-1], last_duration - 1)
+
+        average_frame = np.concatenate(
+            [first_frame[..., None], last_frame[..., None]],
+            axis=2,
+        ).mean(axis=2)
+        average_frame = np.squeeze(average_frame) / 255
+
+        # Interactively draw ROI
+        global _roi_helper
+        if _roi_helper is None:
+            # Ugly but we can only have one instance of this
+            _roi_helper = EasyROI.EasyROI(verbose=False)
+        lines = _roi_helper.draw_line(average_frame, 2)
+        cv2.destroyAllWindows()  # Needed otherwise EasyROI errors
+
+        # Save a copy of the frame with ROIs to PNG file
+        png = output.with_suffix(".png")
+        copy = EasyROI.visualize_line(average_frame, lines, color=(255, 0, 0))
+        plt.imsave(png, copy, cmap='gray')
+
+        # Save lines to file
+        with output.open('wb') as fd:
+            pickle.dump(lines['roi'], fd)
+
+    def inject_slit_crossings(self):
+        """
+        Take the lines drawn from `draw_slit_thresholds` above, get the reach
+        coordinates from DLC output, identify the timepoints when successful reaches
+        crossed the lines in 3D, and add the `reach_onset` event to those timepoints in
+        the action labels.
+        """
+        lines = {}
+        projects = ("LeftCam", "RightCam")
+
+        for project in projects:
+            line_file = self.processed / f"slit_thresholds_{project}.pickle"
+
+            if not line_file.exists():
+                print(self.name, "- Lines not drawn for session.")
+                return
+
+            with line_file.open("rb") as f:
+                proj_lines = pickle.load(f)
+
+            lines[project] = {
+                tt:[pd.Series(p, index=["x", "y"]) for p in points.values()]
+                for tt, points in proj_lines.items()
+            }
+
+        action_labels = self.get_action_labels()
+        event = Events.led_off
+
+        # https://bryceboe.com/2006/10/23/line-segment-intersection-algorithm
+        def ccw(A, B, C):
+            return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x)
+
+        for tt, action in enumerate(
+            (ActionLabels.correct_left, ActionLabels.correct_right),
+        ):
+            data = {}
+            trajectories = {}
+
+            for project in projects:
+                proj_data = self.align_trials(
+                    action,
+                    event,
+                    "motion_tracking",
+                    duration=6,
+                    dlc_project=project,
+                )
+                proj_traj, = check_scorers(proj_data)
+                data[project] = proj_traj
+                trajectories[project] = get_reach_trajectories(proj_traj)[0]
+
+            for rec_num, recording in enumerate(self.files):
+                actions = action_labels[rec_num][:, 0]
+                events = action_labels[rec_num][:, 1]
+                trial_starts = np.where(np.bitwise_and(actions, action))[0]
+
+                for t, start in enumerate(trial_starts):
+                    centre = np.where(np.bitwise_and(events[start:start + 6000], event))[0]
+                    if len(centre) == 0:
+                        raise PixelsError('Action labels probably miscalculated')
+                    centre = start + centre[0]
+                    # centre is index of this rec's grasp
+                    onsets = []
+                    for project, motion in trajectories.items():
+                        left_hand = motion["left_hand_median"][t][:0]
+                        right_hand = motion["right_hand_median"][t][:0]
+                        pt1, pt2 = lines[project][tt]
+
+                        x_l = left_hand.iloc[-10:]["x"].mean()
+                        x_r = right_hand.iloc[-10:]["x"].mean()
+                        hand = right_hand
+                        if project == "LeftCam":
+                            if x_l > x_r:
+                                hand = left_hand
+                        else:
+                            if x_r > x_l:
+                                hand = left_hand
+
+                        segments = zip(
+                            hand.iloc[::-1].iterrows(),
+                            hand.iloc[-2::-1].iterrows(),
+                        )
+
+                        for (end, ptend), (start, ptsta) in segments:
+                            if (
+                                ccw(pt1, ptsta, ptend) != ccw(pt2, ptsta, ptend) and
+                                ccw(pt1, pt2, ptsta) != ccw(pt1, pt2, ptend)
+                            ):
+                                # These lines intersect
+                                #print("x from ", ptsta.x, " to ", ptend.x)
+                                break
+                        #if ptend.y > 300 or ptsta.y > 300:
+                        #    assert 0
+                        onsets.append(start)
+
+                    onset = max(onsets)
+                    onset_timepoint = round(centre + (onset * 1000))
+                    events[onset_timepoint] |= Events.reach_onset
+
+                output = self.processed / recording['action_labels']
+                np.save(output, action_labels[rec_num])
+
+
+global _roi_helper
+_roi_helper = None
+
 
 class VisualOnly(Reach):
     def _extract_action_labels(self, behavioural_data, plot=False):
@@ -192,3 +375,110 @@ class VisualOnly(Reach):
             action_labels[led_onsets[i], 0] += getattr(ActionLabels, label)
 
         return action_labels
+
+
+def get_reach_velocities(*dfs: pd.DataFrame) -> tuple[pd.DataFrame]:
+    """
+    Get the velocity curves for the provided reach trajectories.
+    """
+    results = []
+
+    for df in dfs:
+        df = df.copy()
+        deltas = np.square(df.iloc[1:].values - df.iloc[:-1].values)
+        # Fill the start with a row of zeros - each value is delta in previous 1 ms
+        deltas = np.append(np.zeros((1, deltas.shape[1])), deltas, axis=0)
+        deltas = np.sqrt(deltas[:, ::2] + deltas[:, 1::2])
+        df = df.drop([c for c in df.columns if "y" in c], axis=1)
+        df = df.rename({"x": "delta"}, axis='columns')
+        df.values[:] = deltas
+        results.append(df)
+
+    return tuple(results)
+
+
+def get_reach_trajectories(*dfs: pd.DataFrame) -> tuple[pd.DataFrame]:
+    """
+    Get the median centre point of the hand coordinates - i.e. for the labels for each
+    of the four digits and hand centre for both paws.
+    """
+    assert dfs
+    bodyparts = get_body_parts(dfs[0])
+    right_paw = [p for p in bodyparts if p.startswith("right")]
+    left_paw = [p for p in bodyparts if p.startswith("left")]
+
+    trajectories_l = []
+    trajectories_r = []
+
+    for df in dfs:
+        per_ses_l = []
+        per_ses_r = []
+
+        # Ugly hack so this function works on single sessions
+        if "session" not in df.columns.names:
+            df = pd.concat([df], keys=[0], axis=1)
+            sessions = [0]
+            single_session = True
+        else:
+            single_session = False
+            sessions = df.columns.get_level_values("session").unique()
+
+        for s in sessions:
+            per_trial_l = []
+            per_trial_r = []
+
+            trials = df[s].columns.get_level_values("trial").unique()
+            for t in trials:
+                tdf = df[s][t]
+                left = pd.concat((tdf[p] for p in left_paw), keys=left_paw)
+                right = pd.concat((tdf[p] for p in right_paw), keys=right_paw)
+                per_trial_l.append(left.groupby(level=1).median())
+                per_trial_r.append(right.groupby(level=1).median())
+
+            per_ses_l.append(pd.concat(per_trial_l, axis=1, keys=trials))
+            per_ses_r.append(pd.concat(per_trial_r, axis=1, keys=trials))
+
+        trajectories_l.append(pd.concat(per_ses_l, axis=1, keys=sessions))
+        trajectories_r.append(pd.concat(per_ses_r, axis=1, keys=sessions))
+
+    if single_session:
+        return tuple(
+            pd.concat(
+                [trajectories_l[i][0], trajectories_r[i][0]],
+                axis=1,
+                keys=["left_hand_median", "right_hand_median"],
+            )
+            for i in range(len(dfs))
+        )
+    return tuple(
+        pd.concat(
+            [trajectories_l[i], trajectories_r[i]],
+            axis=1,
+            keys=["left_hand_median", "right_hand_median"],
+        )
+        for i in range(len(dfs))
+    )
+
+
+def check_scorers(*dfs: pd.DataFrame) -> tuple[pd.DataFrame]:
+    """
+    Checks that the scorers are identical for all data in the dataframes. These are the
+    dataframes as returned from Exp.align_trials for motion_tracking data.
+
+    It returns the dataframes with the scorer index level removed.
+    """
+    scorers = set(
+        s
+        for df in dfs
+        for s in df.columns.get_level_values("scorer").unique()
+    )
+
+    assert len(scorers) == 1, scorers
+    return tuple(df.droplevel("scorer", axis=1) for df in dfs)
+
+
+def get_body_parts(df: pd.DataFrame) -> list[str]:
+    """
+    Get the list of body part labels.
+    """
+    return df.columns.get_level_values("bodyparts").unique()
