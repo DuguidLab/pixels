@@ -32,8 +32,14 @@ class Experiment:
     meta_dir : str
         Path to the folder containing training metadata JSON files.
 
+    session_date_fmt : str
+        A format string used to parse the date from the name of session folders. By
+        default this is "%y%m%d" which will capture YYMMDD formats.
+
     """
-    def __init__(self, mouse_ids, behaviour, data_dir, meta_dir=None):
+    def __init__(
+        self, mouse_ids, behaviour, data_dir, meta_dir=None, session_date_fmt="%y%m%d",
+    ):
         if not isinstance(mouse_ids, (list, tuple, set)):
             mouse_ids = [mouse_ids]
 
@@ -56,7 +62,7 @@ class Experiment:
         self.interim = self.data_dir / 'interim'
 
         self.sessions = []
-        sessions = ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir)
+        sessions = ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir, session_date_fmt)
 
         for name, metadata in sessions.items():
             assert len(set(s['data_dir'] for s in metadata)) == 1, "All JSON items with same day must use same data folder."
