@@ -309,6 +309,9 @@ def get_sessions(mouse_ids, data_dir, meta_dir, session_date_fmt):
         If not None, the path to the folder containing training metadata JSON files. If
         None, no metadata is collected.
 
+    session_date_fmt : str
+        String format used to extract the date from folder names.
+
     Returns
     -------
     list of dicts : Dictionaries containing the values that can be used to create new
@@ -343,7 +346,7 @@ def get_sessions(mouse_ids, data_dir, meta_dir, session_date_fmt):
         with meta_file.open() as fd:
             mouse_meta = json.load(fd)
         session_dates = [
-            datetime.datetime.strptime(s.stem[0:6], session_date_fmt) for s in mouse_sessions
+            datetime.datetime.strptime(s.stem.split("_")[0], session_date_fmt) for s in mouse_sessions
         ]
 
         if len(session_dates) != len(set(session_dates)):
@@ -353,6 +356,9 @@ def get_sessions(mouse_ids, data_dir, meta_dir, session_date_fmt):
         for i, session in enumerate(mouse_meta):
             try:
                 meta_date = datetime.datetime.strptime(session['date'], '%Y-%m-%d')
+            except ValueError:
+                # also allow this format
+                meta_date = datetime.datetime.strptime(session['date'], '%Y%m%d')
             except TypeError:
                 raise PixelsError(f"{mouse} session #{i}: 'date' not found in JSON.")
 
