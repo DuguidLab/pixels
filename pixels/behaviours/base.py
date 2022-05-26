@@ -9,6 +9,7 @@ import functools
 import json
 import os
 import pickle
+import shutil
 import tarfile
 import tempfile
 from abc import ABC, abstractmethod
@@ -584,7 +585,7 @@ class Behaviour(ABC):
         if not matches:
             raise PixelsError(f"DLC project {profile} not found.")
         config = working_dir / matches[0] / "config.yaml"
-        output_dir = self.processed / "DLC"
+        output_dir = self.processed / f"DLC_{project}"
 
         videos = []
 
@@ -604,6 +605,8 @@ class Behaviour(ABC):
                     videos.append(avi.as_posix())
 
         if analyse:
+            if output_dir.exists():
+                shutil.rmtree(output_dir.as_posix())
             deeplabcut.analyze_videos(config, videos, destfolder=output_dir)
             deeplabcut.plot_trajectories(config, videos, destfolder=output_dir)
             deeplabcut.filterpredictions(config, videos, destfolder=output_dir)
@@ -663,8 +666,25 @@ class Behaviour(ABC):
 
         trigger = signal.binarise(behavioural_data["/'CamFrames'/'0'"]).values
         onsets = np.where((trigger[:-1] == 1) & (trigger[1:] == 0))[0]
+
         timestamps = ioutils.tdms_parse_timestamps(metadata)
-        assert len(onsets) == len(timestamps) == len(coords)
+        assert len(timestamps) == len(coords)
+
+        # If there are more onsets in the tdms data, just extend the motion tracking
+        # data with 0s up until the end to avoid IndexErrors when trying to index into
+        # shorter coordinate arrays. This shouldn't matter as it's 1-2 seconds max at
+        # the end of the session where the camera stopped before the behaviour rec.
+        if len(onsets) > len(coords):
+            overhang = len(onsets) - len(coords)
+            top = coords.shape[0]
+            index = coords.index.values
+            new_index = np.concatenate([
+                    index,
+                    np.arange(index[-1] + 1, index[-1] + overhang + 1),
+            ])
+            coords = coords.reindex(new_index).fillna(0)
+
+        assert len(onsets) == len(coords)
 
         # The last frame sometimes gets delayed a bit, so ignoring it, are the timestamp
         # diffs fixed?
@@ -694,7 +714,7 @@ class Behaviour(ABC):
             # Un-invert y coordinates
             label_coords.y = 480 - label_coords.y
 
-            # Remove unlikely coordinates from fitted B-spline
+            # Remove unlikely coordinates from fit
             bads = label_coords["likelihood"] < likelihood_threshold
             good_onsets = onsets[~bads]
             assert len(good_onsets) == len(onsets) - bads.sum()
@@ -1281,7 +1301,7 @@ class Behaviour(ABC):
             #'spike',        # Raw/downsampled channels from probe (AP)
             'spike_times',  # List of spike times per unit
             'spike_rate',   # Spike rate signals from convolved spike times
-            #'lfp',          # Raw/downsampled channels from probe (LFP)
+            'lfp',          # Raw/downsampled channels from probe (LFP)
             #'motion_index', # Motion indexes per ROI from the video
             'motion_tracking', # Motion tracking coordinates from DLC
         ]
@@ -1391,22 +1411,28 @@ class Behaviour(ABC):
 
     @_cacheable
     def get_spike_widths(self, units=None):
-        from phylib.io.model import load_model
-        from phylib.utils.color import selected_cluster_color
+        if units:
+            # Always defer to getting widths for all units, so we only ever have to
+            # calculate spike widths for each once.
+            all_widths = self.get_spike_widths()
+            return all_widths.loc[all_widths.unit.isin(units)]
 
         print("Calculating spike widths")
-        waveforms = self.get_spike_waveforms(units=units)
+        waveforms = self.get_spike_waveforms()
         widths = []
 
         for unit in waveforms.columns.get_level_values('unit').unique():
             u_widths = []
             u_spikes = waveforms[unit]
+            assert 0, "WORK IN PROGRESS"
+
             for s in u_spikes:
                 spike = u_spikes[s]
                 trough = np.where(spike.values == min(spike))[0][0]
                 after = spike.values[trough:]
                 width = np.where(after == max(after))[0][0]
                 u_widths.append(width)
+
             widths.append((unit, np.median(u_widths)))
 
         df = pd.DataFrame(widths, columns=["unit", "median_ms"])
@@ -1420,8 +1446,13 @@ class Behaviour(ABC):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
 
-        if units is None:
-            units = self.select_units()
+        if units:
+            # defer to getting waveforms for all units
+            waveforms = self.get_spike_waveforms()
+            assert 0, "WORK IN PROGRESS"
+            return
+
+        units = self.select_units()
 
         paramspy = self.processed / 'sorted_stream_0' / 'params.py'
         if not paramspy.exists():

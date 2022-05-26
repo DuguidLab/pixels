@@ -208,7 +208,7 @@ class Experiment:
         """
         units = []
 
-        for session in self.sessions:
+        for i, session in enumerate(self.sessions):
             units.append(session.select_units(*args, **kwargs))
 
         return units
@@ -218,24 +218,25 @@ class Experiment:
         Get trials aligned to an event. Check behaviours.base.Behaviour.align_trials for
         usage information.
         """
-        trials = []
+        trials = {}
         for i, session in enumerate(self.sessions):
             if units:
-                trials.append(session.align_trials(*args, units=units[i], **kwargs))
+                if units[i]:
+                    trials[i] = session.align_trials(*args, units=units[i], **kwargs)
             else:
-                trials.append(session.align_trials(*args, **kwargs))
+                trials[i] = session.align_trials(*args, **kwargs)
 
         if "motion_tracking" in args:
             df = pd.concat(
-                trials, axis=1, copy=False,
-                keys=range(len(trials)),
+                trials.values(), axis=1, copy=False,
+                keys=trials.keys(),
                 names=["session", "trial", "scorer", "bodyparts", "coords"]
             )
 
         else:
             df = pd.concat(
-                trials, axis=1, copy=False,
-                keys=range(len(trials)),
+                trials.values(), axis=1, copy=False,
+                keys=trials.keys(),
                 names=["session", "unit", "trial"]
             )
 
@@ -252,18 +253,18 @@ class Experiment:
         """
         Get the widths of spikes for units matching the specified criteria.
         """
-        widths = []
+        widths = {}
 
         for i, session in enumerate(self.sessions):
             if units:
-                ses_widths = session.get_spike_widths(units=units[i])
+                if units[i]:
+                    widths[i] = session.get_spike_widths(units=units[i])
             else:
-                ses_widths = session.get_spike_widths()
-            widths.append(ses_widths)
+                widths[i] = session.get_spike_widths()
 
         df = pd.concat(
-            widths, axis=1, copy=False,
-            keys=range(len(widths)),
+            widths.values(), axis=1, copy=False,
+            keys=widths.keys(),
             names=["session"]
         )
         return df
@@ -272,18 +273,18 @@ class Experiment:
         """
         Get the waveforms of spikes for units matching the specified criteria.
         """
-        waveforms = []
+        waveforms = {}
 
         for i, session in enumerate(self.sessions):
             if units:
-                ses_wfs = session.get_spike_waveforms(units=units[i])
+                if units[i]:
+                    waveforms[i] = session.get_spike_waveforms(units=units[i])
             else:
-                ses_wfs = session.get_spike_waveforms()
-            waveforms.append(ses_wfs)
+                waveforms[i] = session.get_spike_waveforms()
 
         df = pd.concat(
-            waveforms, axis=1, copy=False,
-            keys=range(len(waveforms)),
+            waveforms.values(), axis=1, copy=False,
+            keys=waveforms.keys(),
             names=["session"]
         )
         return df
