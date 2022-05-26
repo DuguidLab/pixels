@@ -1298,7 +1298,7 @@ class Behaviour(ABC):
 
         data_options = [
             'behavioural',  # Channels from behaviour TDMS file
-            #'spike',        # Raw/downsampled channels from probe (AP)
+            'spike',        # Raw/downsampled channels from probe (AP)
             'spike_times',  # List of spike times per unit
             'spike_rate',   # Spike rate signals from convolved spike times
             'lfp',          # Raw/downsampled channels from probe (LFP)
