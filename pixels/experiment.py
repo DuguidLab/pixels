@@ -32,13 +32,23 @@ class Experiment:
     meta_dir : str
         Path to the folder containing training metadata JSON files.
 
+    interim_dir : str
+        Path to the folder to use for interim files. If not passed, this will default to
+        a folder inside the data_dir called 'interim'.
+
     session_date_fmt : str
         A format string used to parse the date from the name of session folders. By
         default this is "%y%m%d" which will capture YYMMDD formats.
 
     """
     def __init__(
-        self, mouse_ids, behaviour, data_dir, meta_dir=None, session_date_fmt="%y%m%d",
+        self,
+        mouse_ids,
+        behaviour,
+        data_dir,
+        meta_dir=None,
+        interim_dir=None,
+        session_date_fmt="%y%m%d",
     ):
         if not isinstance(mouse_ids, (list, tuple, set)):
             mouse_ids = [mouse_ids]
@@ -57,10 +67,6 @@ class Experiment:
         else:
             self.meta_dir = None
 
-        self.raw = self.data_dir / 'raw'
-        self.processed = self.data_dir / 'processed'
-        self.interim = self.data_dir / 'interim'
-
         self.sessions = []
         sessions = ioutils.get_sessions(mouse_ids, self.data_dir, self.meta_dir, session_date_fmt)
 
@@ -71,6 +77,7 @@ class Experiment:
                     name,
                     metadata=[s['metadata'] for s in metadata],
                     data_dir=metadata[0]['data_dir'],
+                    interim_dir=interim_dir,
                 )
             )
 

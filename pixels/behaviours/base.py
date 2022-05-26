@@ -99,19 +99,27 @@ class Behaviour(ABC):
         A dictionary of metadata for this session. This is typically taken from the
         session's JSON file.
 
+    interim_dir : pathlib.Path
+        An non-default interim folder that we can use for faster access to interim
+        files, for example, instead of one in the data_dir.
+
     """
 
     sample_rate = 1000
 
-    def __init__(self, name, data_dir, metadata=None):
+    def __init__(self, name, data_dir, metadata=None, interim_dir=None):
         self.name = name
         self.data_dir = data_dir
         self.metadata = metadata
 
         self.raw = self.data_dir / 'raw' / self.name
-        self.interim = self.data_dir / 'interim' / self.name
         self.processed = self.data_dir / 'processed' / self.name
         self.files = ioutils.get_data_files(self.raw, name)
+
+        if interim_dir is None:
+            self.interim = self.data_dir / 'interim' / self.name
+        else:
+            self.interim = Path(interim_dir) / self.name
 
         self.interim.mkdir(parents=True, exist_ok=True)
         self.processed.mkdir(parents=True, exist_ok=True)
