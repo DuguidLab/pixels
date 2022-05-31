@@ -48,15 +48,32 @@ class ActionLabels:
     naive_short = naive_left_short | naive_right_short
     naive_long = naive_left_long | naive_right_long
 
+    # Timepoints determined from motion tracking
+    clean_left = 1 << 10  # Cued single reach to grasp
+    clean_right = 1 << 11
+    multi_left = 1 << 12  # Cued multiple reaches before reward
+    multi_right = 1 << 13
+    precue_rewarded_left = 1 << 14  # Cued by well-timed spontaneous reach right before
+    precue_rewarded_right = 1 << 15
+    tracking_fail_left = 1 << 16  # Motion tracking failed to get reach trajectory
+    tracking_fail_right = 1 << 17
+    long_reach_duration_left = 1 << 17
+    long_reach_duration_right = 1 << 18
+    clean = clean_left | clean_right
+    multi = multi_left | multi_right
+    precue_rewarded = precue_rewarded_left | precue_rewarded_right
+    tracking_fail = tracking_fail_left | tracking_fail_right
+    long_reach_duration = long_reach_duration_left | long_reach_duration_right
+
 
 class Events:
     led_on = 1 << 0
     led_off = 1 << 1
 
-    # Timepoints determined using DeepLabCut
-    reach_onset_left = 1 << 2
-    reach_onset_right = 1 << 3
-    reach_onset = reach_onset_left | reach_onset_right
+    # Timepoints determined from motion tracking
+    reach_onset = 1 << 2
+    reach_offset = 1 << 3
+    grasp = 1 << 4
 
 
 # These are used to convert the trial data into Actions and Events
@@ -260,8 +277,9 @@ class Reach(Behaviour):
         """
         Take the lines drawn from `draw_slit_thresholds` above, get the reach
         coordinates from DLC output, identify the timepoints when successful reaches
-        crossed the lines in 3D, and add the `reach_onset` event to those timepoints in
-        the action labels.
+        crossed the lines, and add the `reach_onset` event to those timepoints in the
+        action labels. Also identify which trials need clearing up, i.e. those with
+        multiple reaches or have failed motion tracking, and exclude those.
         """
         lines = {}
         projects = ("LeftCam", "RightCam")
