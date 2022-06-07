@@ -4,6 +4,7 @@ data and run subsequent analyses.
 """
 
 
+from operator import attrgetter
 from pathlib import Path
 
 import pandas as pd
@@ -80,6 +81,8 @@ class Experiment:
                     interim_dir=interim_dir,
                 )
             )
+
+        self.sessions.sort(key=attrgetter("name"))
 
     def __getitem__(self, index):
         """
