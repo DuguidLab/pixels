@@ -65,6 +65,22 @@ class ActionLabels:
     tracking_fail = tracking_fail_left | tracking_fail_right
     long_reach_duration = long_reach_duration_left | long_reach_duration_right
 
+    clean_incorrect_left = 1 << 19  # Cued single reach to grasp
+    clean_incorrect_right = 1 << 20
+    multi_incorrect_left = 1 << 21  # Cued multiple reaches before reward
+    multi_incorrect_right = 1 << 22
+    precue_incorrect_left = 1 << 23  # Cued by well-timed spontaneous reach right before
+    precue_incorrect_right = 1 << 24
+    tracking_fail_incorrect_left = 1 << 25  # Motion tracking failed to get reach trajectory
+    tracking_fail_incorrect_right = 1 << 26
+    long_reach_duration_incorrect_left = 1 << 27
+    long_reach_duration_incorrect_right = 1 << 28
+    clean_incorrect = clean_incorrect_left | clean_incorrect_right
+    multi_incorrect = multi_incorrect_left | multi_incorrect_right
+    precue_incorrect = precue_incorrect_left | precue_incorrect_right
+    tracking_fail_incorrect = tracking_fail_incorrect_left | tracking_fail_incorrect_right
+    long_reach_duration_incorrect = long_reach_duration_incorrect_left | long_reach_duration_incorrect_right
+
 
 class Events:
     led_on = 1 << 0
@@ -74,6 +90,9 @@ class Events:
     reach_onset = 1 << 2
     reach_offset = 1 << 3
     grasp = 1 << 4
+    reach_onset_subsequent = 1 << 5  # The SECOND full reach on a clean correct trial only
+    reach_offset_subsequent = 1 << 6
+    grasp_subsequent = 1 << 7
 
 
 # These are used to convert the trial data into Actions and Events
@@ -98,7 +117,7 @@ class Reach(Behaviour):
                 + 0.5 * behavioural_data["/'NpxlSync_Signal'/'0'"]
 
         behavioural_data = signal.binarise(behavioural_data)
-        action_labels = np.zeros((len(behavioural_data), 2), dtype=np.int16)
+        action_labels = np.zeros((len(behavioural_data), 2), dtype=np.uint64)
 
         try:
             cue_leds = behavioural_data["/'ReachLEDs'/'0'"].values
