@@ -90,7 +90,7 @@ used by the pipeline:
 
 .. code-block:: python
 
-    conda env create -n pixels numpy pandas nptdms scipy matplotlib opencv -c conda-forge
+    conda create -n pixels numpy pandas nptdms scipy matplotlib opencv -c conda-forge
     conda activate pixels
     pip install ffmpeg-python spikeinterface probeinterface
 
