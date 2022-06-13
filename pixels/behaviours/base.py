@@ -1627,9 +1627,9 @@ class Behaviour(ABC):
 
         if units:
             # defer to getting waveforms for all units
-            waveforms = self.get_spike_waveforms()
-            assert 0, "WORK IN PROGRESS"
-            return
+            waveforms = self.get_spike_waveforms()[units]
+            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
+            return waveforms
 
         units = self.select_units()
 
@@ -1639,7 +1639,8 @@ class Behaviour(ABC):
         model = load_model(paramspy)
         rec_forms = {}
 
-        for unit in units:
+        for u, unit in enumerate(units):
+            print(100 * u / len(units), "% complete")
             # get the waveforms from only the best channel
             spike_ids = model.get_cluster_spikes(unit)
             best_chan = model.get_cluster_channels(unit)[0]
