@@ -211,16 +211,17 @@ def read_tdms(path, groups=None):
     return df
 
 
-def save_ndarray_as_video(video, path, frame_rate):
+def save_ndarray_as_video(video, path, frame_rate, dims=None):
     """
     Save a numpy.ndarray as video file.
 
     Parameters
     ----------
-    video : numpy.ndarray
+    video : numpy.ndarray, or generator
         Video data to save to file. It's dimensions should be (duration, height, width)
         and data should be of uint8 type. The file extension determines the resultant
-        file type.
+        file type. Alternatively, this can be a generator that yields frames of this
+        description, in which case 'dims' must also be passed.
 
     path : string / pathlib.Path object
         File to which the video will be saved.
@@ -228,8 +229,16 @@ def save_ndarray_as_video(video, path, frame_rate):
     frame_rate : int
         The frame rate of the output video.
 
+    dims : (int, int)
+        (height, width) of video. This is only needed if 'video' is a generator that
+        yields frames, as then the shape cannot be taken from it directly.
+
     """
-    _, height, width = video.shape
+    if isinstance(video, np.ndarray):
+        _, height, width = video.shape
+    else:
+        height, width = dims
+
     path = Path(path)
 
     process = (
@@ -241,8 +250,11 @@ def save_ndarray_as_video(video, path, frame_rate):
     )
 
     for frame in video:
+        if not isinstance(frame, list):
+            # We can accept a 3D array as a list of 3 2D arrays, or just one 2D array
+            frame = [frame, frame, frame]
         process.stdin.write(
-            np.stack([frame, frame, frame], axis=2)
+            np.stack(frame, axis=2)
             .astype(np.uint8)
             .tobytes()
         )
@@ -530,6 +542,32 @@ def load_video_frame(path, frame):
     return frame
 
 
+def load_video_frames(path, frames):
+    """
+    Load a consecutive sequence of frames from a video into a numpy array.
+
+    Parameters
+    ----------
+    path : str
+        File path to a video file.
+
+    frame : Sequence
+        Array/list/etc of 0-based indices of frames to load. This function only
+        considers the first value and the length, it doesn't check the actual values of
+        the remaining elements.
+
+    """
+    if not isinstance(path, str):
+        path = path.as_posix()
+
+    video = cv2.VideoCapture(path)
+
+    retval = video.set(cv2.CAP_PROP_POS_FRAMES, frames[0])
+    assert retval  # Check it worked fine
+
+    return stream_video(video, length=len(frames))
+
+
 def get_video_dimensions(path):
     """
     Get a tuple of (width, height, frames) for a video.
@@ -564,21 +602,35 @@ def get_video_fps(path):
     return fps
 
 
-def stream_video(path):
+def stream_video(video, length=None):
     """
     Iterate over a video's frames.
 
     Parameters
     ----------
-    path : str
-        File path to a video file.
+    path : str or cv2.VideoCapture
+        File path to a video file to open, or already open VideoCapture instance.
+
+    length : int
+        Positive integer representing the number of frames to load.
 
     """
-    video = cv2.VideoCapture(path)
-    frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    if not isinstance(video, cv2.VideoCapture):
+        if isinstance(video, Path):
+            path = path.as_posix()
+        video = cv2.VideoCapture(path)
+
+    if length is not None:
+        assert length > 0
 
     while True:
         _, pixels = video.read()
         if pixels is None:
-            return
+            break
+
         yield pixels[:, :, 0]  # TODO: should be 1 channel
+
+        if length is not None:
+            length -= 1
+            if length == 0:
+                break

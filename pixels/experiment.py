@@ -4,7 +4,7 @@ data and run subsequent analyses.
 """
 
 
-from operator import attrgetter
+from operator import attrgetter, itemgetter
 from pathlib import Path
 
 import pandas as pd
@@ -177,32 +177,26 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.run_motion_tracking(*args, **kwargs)
 
-    def draw_motion_index_rois(self, num_rois=1):
+    def draw_motion_index_rois(self, video_match, num_rois=1):
         """
         Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
-
-        Parameters
-        ----------
-        num_rois : int
-            The number of ROIs to draw interactively. Default: 1
-
         """
         for i, session in enumerate(self.sessions):
             print(">>>>> Drawing motion index ROIs for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.draw_motion_index_rois(num_rois=num_rois)
+            session.draw_motion_index_rois(video_match, num_rois=num_rois)
 
-    def process_motion_index(self, num_rois=1):
+    def process_motion_index(self, video_match, num_rois=1):
         """
         Extract motion indexes from videos for all sessions.
         """
         for session in self.sessions:
-            session.draw_motion_index_rois(num_rois=num_rois)
+            session.draw_motion_index_rois(video_match, num_rois=num_rois)
 
         for i, session in enumerate(self.sessions):
             print(">>>>> Processing motion index for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.process_motion_index()
+            session.process_motion_index(video_match)
 
     def select_units(self, *args, **kwargs):
         """
@@ -240,9 +234,17 @@ class Experiment:
             df = pd.concat(
                 trials.values(), axis=1, copy=False,
                 keys=trials.keys(),
-                names=["session", "unit", "trial"]
+                names=["session"] + trials[0].columns.names,
             )
 
+        return df
+
+    def align_clips(self, label, event, video_match, duration=1):
+        trials = []
+        for session in self.sessions:
+            trials.append(session.align_clips(label, event, video_match, duration))
+
+        df = pd.concat(trials, axis=1, copy=False, names=["Session"], keys=range(len(trials)))
         return df
 
     def get_cluster_info(self):

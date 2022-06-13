@@ -246,7 +246,7 @@ def convolve(times, duration, sigma=None):
     return df
 
 
-def motion_index(video, rois, output_hz):
+def motion_index(video, rois):
     """
     Calculating motion indexes from a video for a set of ROIs.
 
@@ -258,10 +258,9 @@ def motion_index(video, rois, output_hz):
     rois : dict, as saved by Behaviour.draw_motion_index_rois
         Regions of interest used to mask video when calculating MIs.
 
-    output_hz : int
-        Frequency to save output MI as.
-
     """
+    if not isinstance(video, str):
+        video = video.as_posix()
     width, height, duration = ioutils.get_video_dimensions(video)
     mi = np.zeros((duration, len(rois)))
 
@@ -284,68 +283,7 @@ def motion_index(video, rois, output_hz):
         masked = masks[:, :] * frame[:, :, None] - prev_frame
         mi[i, :] = (masked * masked).sum(axis=0).sum(axis=0)
 
-    # Resample to specified frequency
-    fps = ioutils.get_video_fps(video)
-    if fps == 33 and output_hz == 1000:
-        # hack to avoid a weird 33/1000 resampling ratio
-        output_hz = 990
-    mi = resample(mi, fps, output_hz)
-
     # Normalise
     mi = mi / mi.max(axis=0)
 
     return mi
-
-
-def extract_led_sync_signal(video, roi, output_hz):
-    """
-    Extract the TTL-like sync signal provided by an LED within a video.
-
-    Parameters
-    -------
-    video : str
-        Path to a video.
-
-    roi : dict, as saved by Behaviour.draw_motion_index_rois
-        Region of interest used to mask video when calculating MIs.
-
-    output_hz : int
-        Frequency to save output MI as.
-
-    """
-
-    
-
-
-    width, height, duration = ioutils.get_video_dimensions(video)
-    mi = np.zeros((duration, 1))
-
-    # Create roi masks
-    # height and width are in this order due to how frames are usually saved
-    masks = np.zeros((height, width, 1), dtype=np.uint8)
-
-    polygon = np.array(roi['vertices'], dtype=np.int32)
-    mask = np.zeros((height, width, 1), dtype=np.uint8)
-    # this complains when passed a view into another array for some reason
-    cv2.fillConvexPoly(mask, polygon, (1,))
-    np.copyto(masks[:, :, 0], np.squeeze(mask))
-
-    # Calculate motion indexes
-    prev_frame = np.zeros((height, width, 1), dtype=np.uint8)
-    masked = np.zeros(masks.shape, dtype=np.uint8)
-
-    for i, frame in enumerate(ioutils.stream_video(video)):
-        masked = masks[:, :] * frame[:, :, None] - prev_frame
-        mi[i, :] = (masked).sum(axis=0).sum(axis=0)
-
-    # Resample to specified frequency
-    fps = ioutils.get_video_fps(video)
-    if fps == 33 and output_hz == 1000:
-        # hack to avoid a weird 33/1000 resampling ratio
-        output_hz = 990
-    mi = resample(mi, fps, output_hz)
-
-    # Normalise
-    mi = mi / mi.max(axis=0)
-
-    return binarise(mi)
