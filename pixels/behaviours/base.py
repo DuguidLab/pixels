@@ -742,7 +742,7 @@ class Behaviour(ABC):
         df = pd.concat(processed, axis=1)
         return pd.concat({scorer: df}, axis=1, names=coords.columns.names)
 
-    def draw_motion_index_rois(self, video_match, num_rois=1):
+    def draw_motion_index_rois(self, video_match, num_rois=1, skip=True):
         """
         Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
 
@@ -753,6 +753,9 @@ class Behaviour(ABC):
 
         num_rois : int
             The number of ROIs to draw interactively. Default: 1
+
+        skip : bool
+            Whether to skip drawing ROIs if they already exist. Default: True.
 
         """
         # Only needed for this method
@@ -778,7 +781,7 @@ class Behaviour(ABC):
                     raise PixelsError(f"Path {avi} should exist but doesn't... discuss.")
 
                 roi_file = self.processed / (avi.with_suffix("").stem + f"-MI_ROIs_{i}.pickle")
-                if roi_file.exists():
+                if skip and roi_file.exists():
                     continue
 
                 # Load frame from video

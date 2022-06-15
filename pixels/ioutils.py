@@ -617,8 +617,8 @@ def stream_video(video, length=None):
     """
     if not isinstance(video, cv2.VideoCapture):
         if isinstance(video, Path):
-            path = path.as_posix()
-        video = cv2.VideoCapture(path)
+            video = video.as_posix()
+        video = cv2.VideoCapture(video)
 
     if length is not None:
         assert length > 0

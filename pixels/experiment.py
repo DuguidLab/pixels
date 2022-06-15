@@ -177,21 +177,22 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.run_motion_tracking(*args, **kwargs)
 
-    def draw_motion_index_rois(self, video_match, num_rois=1):
+    def draw_motion_index_rois(self, video_match, num_rois=1, skip=True):
         """
-        Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
+        Draw motion index ROIs using EasyROI. If ROIs already exist, skip, unless skip
+        is False.
         """
         for i, session in enumerate(self.sessions):
             print(">>>>> Drawing motion index ROIs for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.draw_motion_index_rois(video_match, num_rois=num_rois)
+            session.draw_motion_index_rois(video_match, num_rois=num_rois, skip=skip)
 
-    def process_motion_index(self, video_match, num_rois=1):
+    def process_motion_index(self, video_match, num_rois=1, skip=True):
         """
         Extract motion indexes from videos for all sessions.
         """
         for session in self.sessions:
-            session.draw_motion_index_rois(video_match, num_rois=num_rois)
+            session.draw_motion_index_rois(video_match, num_rois=num_rois, skip=skip)
 
         for i, session in enumerate(self.sessions):
             print(">>>>> Processing motion index for session {} ({} / {})"
