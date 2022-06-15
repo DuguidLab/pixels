@@ -471,16 +471,20 @@ class Behaviour(ABC):
             if output.exists():
                 continue
 
-            data_file = self.find_file(recording['spike_data'])
-            num_chans = self.spike_meta[rec_num]['nSavedChans']
+            print("\n>>>>> Getting raw lfp data...")
+            data_file = self.find_file(recording['lfp_data'])
+            num_chans = self.lfp_meta[rec_num]['nSavedChans']
             data = ioutils.read_bin(data_file, num_chans)
 
             # sample some points -- it takes too long to use them all
+            print("\n>>>>> Sampling data...")
             length = data.shape[0]
             points = np.random.choice(range(length), length // 60, replace=False)
             sample = data[points, :-1]
             median = np.median(sample, axis=1)
             SDs = []
+
+            print(">>>>>> Gettting standard deviation...")
             for i in range(384):
                 SDs.append(np.std(sample[:, i] - median))
 
@@ -491,6 +495,8 @@ class Behaviour(ABC):
 
             with open(output, 'w') as fd:
                 json.dump(results, fd)
+
+            print(f"Results of noise assessment is saved in {output}.")
 
     def extract_videos(self, force=False):
         """
@@ -742,15 +748,12 @@ class Behaviour(ABC):
         df = pd.concat(processed, axis=1)
         return pd.concat({scorer: df}, axis=1, names=coords.columns.names)
 
-    def draw_motion_index_rois(self, video_match, num_rois=1):
+    def draw_motion_index_rois(self, num_rois=1):
         """
         Draw motion index ROIs using EasyROI. If ROIs already exist, skip.
 
         Parameters
         ----------
-        video_match : str
-            A string to match video file names. 
-
         num_rois : int
             The number of ROIs to draw interactively. Default: 1
 
@@ -762,127 +765,75 @@ class Behaviour(ABC):
         roi_helper = EasyROI.EasyROI(verbose=False)
 
         for i, recording in enumerate(self.files):
-            for v, video in enumerate(recording.get('camera_data', [])):
-                if video_match not in video.stem:
-                    continue
-
-                avi = self.interim / video.with_suffix('.avi')
-                if not avi.exists():
-                    meta = recording['camera_meta'][v]
-                    ioutils.tdms_to_video(
-                        self.find_file(video, copy=False),
-                        self.find_file(meta),
-                        avi,
-                    )
-                if not avi.exists():
-                    raise PixelsError(f"Path {avi} should exist but doesn't... discuss.")
-
-                roi_file = self.processed / (avi.with_suffix("").stem + f"-MI_ROIs_{i}.pickle")
+            if 'camera_data' in recording:
+                roi_file = self.processed / f"motion_index_ROIs_{i}.pickle"
                 if roi_file.exists():
                     continue
 
                 # Load frame from video
-                duration = ioutils.get_video_dimensions(avi.as_posix())[2]
-                frame = ioutils.load_video_frame(avi.as_posix(), duration // 4)
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
+                if not video.exists():
+                    raise PixelsError(self.name + ": AVI video not found, run `extract_videos`")
+
+                duration = ioutils.get_video_dimensions(video.as_posix())[2]
+                frame = ioutils.load_video_frame(video.as_posix(), duration // 4)
 
                 # Interactively draw ROI
                 roi = roi_helper.draw_polygon(frame, num_rois)
                 cv2.destroyAllWindows()  # Needed otherwise EasyROI errors
 
                 # Save a copy of the frame with ROIs to PNG file
+                png = self.processed / f'motion_index_ROIs_{i}.png'
                 copy = EasyROI.visualize_polygon(frame, roi, color=(255, 0, 0))
-                plt.imsave(roi_file.with_suffix(".png"), copy, cmap='gray')
+                plt.imsave(png, copy, cmap='gray')
 
                 # Save ROI to file
                 with roi_file.open('wb') as fd:
                     pickle.dump(roi['roi'], fd)
 
-    def process_motion_index(self, video_match):
+    def process_motion_index(self):
         """
         Extract motion indexes from videos using already drawn ROIs.
-
-        Parameters
-        ----------
-        video_match : str
-            A string to match video and ROI file names. 
-
         """
+
         ses_rois = {}
 
         # First collect all ROIs to catch errors early
-        for rec_num, recording in enumerate(self.files):
-            for v, video in enumerate(recording.get('camera_data', [])):
-                if video_match not in video.stem:
-                    continue
-
-                roi_file = self.processed / (video.with_suffix("").stem + f"-MI_ROIs_{rec_num}.pickle")
+        for i, recording in enumerate(self.files):
+            if 'camera_data' in recording:
+                roi_file = self.processed / f"motion_index_ROIs_{i}.pickle"
                 if not roi_file.exists():
                     raise PixelsError(self.name + ": ROIs not drawn for motion index.")
 
                 # Also check videos are available
-                avi = self.interim / video.with_suffix('.avi')
-                if not avi.exists():
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
+                if not video.exists():
                     raise PixelsError(self.name + ": AVI video not found in interim folder.")
 
                 with roi_file.open('rb') as fd:
-                    ses_rois[(rec_num, v)] = (pickle.load(fd), roi_file)
+                    ses_rois[i] = pickle.load(fd)
 
         # Then do the extraction
         for rec_num, recording in enumerate(self.files):
-            for v, video in enumerate(recording.get('camera_data', [])):
-                if video_match not in video.stem:
-                    continue
+            if 'camera_data' in recording:
 
                 # Get MIs
-                avi = self.interim / video.with_suffix('.avi')
-                rec_rois, roi_file = ses_rois[(rec_num, v)]
-                rec_mi = signal.motion_index(avi, rec_rois)
+                raise NotImplementedError
+                video = self.interim / recording['camera_data'].with_suffix('.avi')
+                rec_rois = ses_rois[rec_num]
+                rec_mi = signal.motion_index(video.as_posix(), rec_rois, self.sample_rate)
 
-                # Align MIs to action labels
-                behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
+                # TODO: Use timestamps for real alignment
+                # Get initial timestamp of behavioural data
+                #behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
+                #for key in behavioural_data.keys():
+                #    if key.startswith("/'t0'/"):
+                #        t0 = behavioural_data[key][0]
+                #        break
+                #metadata = ioutils.read_tdms(self.find_file(recording['camera_meta']))
+                #timestamps = ioutils.tdms_parse_timestamps(metadata)
 
-                # ignore any columns that have Nans; these just contain settings
-                for col in behavioural_data:
-                    if behavioural_data[col].isnull().values.any():
-                        behavioural_data.drop(col, axis=1, inplace=True)
-
-                behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
-                behavioural_data.iloc[:len(behav_array), :] = behav_array
-                behavioural_data = behavioural_data[:len(behav_array)]
-                trigger = signal.binarise(behavioural_data["/'CamFrames'/'0'"]).values
-                onsets = np.where((trigger[:-1] == 1) & (trigger[1:] == 0))[0]
-
-                metadata = ioutils.read_tdms(self.find_file(recording['camera_meta'][v]))
-                timestamps = ioutils.tdms_parse_timestamps(metadata)
-                assert len(timestamps) == len(rec_mi)
-
-                if len(onsets) > len(rec_mi):
-                    assert False, "See _align_dlc_coords for solution here."
-
-                assert len(onsets) == len(rec_mi)
-
-                # The last frame sometimes gets delayed a bit, so ignoring it, are the timestamp
-                # diffs fixed?
-                assert len(np.unique(np.diff(onsets[:-1]))) == 1
-
-                if self._lag[rec_num] is None:
-                    self.sync_data(
-                        rec_num,
-                        behavioural_data=behavioural_data["/'NpxlSync_Signal'/'0'"].values,
-                    )
-                lag_start, lag_end = self._lag[rec_num]
-                no_lag = slice(max(lag_start, 0), -1-max(lag_end, 0))
-
-                xs = np.arange(0, len(trigger))
-                ynew = interpolate.interp1d(
-                    onsets, rec_mi, axis=0, fill_value="extrapolate",
-                )(xs)
-
-                result = ynew[no_lag]
-                action_labels = self.get_action_labels()[rec_num]
-                assert action_labels.shape[0] == result.shape[0]
-
-                np.save(roi_file.with_suffix(".npy"), result)
+                np.save(self.processed / f'motion_index_{i}.npy', rec_mi)
 
     def add_motion_index_action_label(
         self, label: int, event: int, roi: int, value: int
@@ -912,7 +863,6 @@ class Behaviour(ABC):
             representing movement onsets.
 
         """
-        assert False, "TODO"
         action_labels = self.get_action_labels()
         motion_indexes = self.get_motion_index_data()
 
@@ -1028,29 +978,12 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_behavioural_data", "behaviour_processed")
 
-    def get_motion_index_data(self, video_match):
+    def get_motion_index_data(self):
         """
         Returns the motion indexes, either from self._motion_index if they have been
         loaded already, or from file.
         """
-        if all(i is None for i in self._motion_index):
-            if video_match is None:
-                raise PixelsError("video_match needed to get motion index data")
-
-            for rec_num, recording in enumerate(self.files):
-                for v, video in enumerate(recording.get('camera_data', [])):
-                    if video_match not in video.stem:
-                        continue
-
-                    mi_file = self.processed / (
-                        video.with_suffix("").stem + f"-MI_ROIs_{rec_num}.npy"
-                    )
-                    if not mi_file.exists():
-                        raise PixelsError(f"Can't align to motion index file that hasn't been created.")
-
-                    self._motion_index[rec_num] = np.load(mi_file)
-
-        return self._motion_index
+        return self._get_processed_data("_motion_index", "motion_index")
 
     def get_motion_tracking_data(self, dlc_project: str):
         """
@@ -1159,10 +1092,7 @@ class Behaviour(ABC):
             for i, start in enumerate(trial_starts, start=i + 1):
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
                 if len(centre) == 0:
-                    # See comment in align_trials as to why we just continue instead of
-                    # erroring like we used to here.
-                    print("No event found for an action. If this is OK, ignore this.")
-                    continue
+                    raise PixelsError('Action labels probably miscalculated')
                 centre = start + centre[0]
 
                 trial = rec_spikes[centre - half < rec_spikes]
@@ -1330,7 +1260,7 @@ class Behaviour(ABC):
     @_cacheable
     def align_trials(
         self, label, event, data='spike_times', raw=False, duration=1, sigma=None,
-        units=None, dlc_project=None, video_match=None,
+        units=None, dlc_project=None,
     ):
         """
         Get trials aligned to an event. This finds all instances of label in the action
@@ -1369,10 +1299,6 @@ class Behaviour(ABC):
             The DLC project from which to get motion tracking coordinates, if aligning
             to motion_tracking data.
 
-        video_match : str | None
-            When aligning video or motion index data, use this fnmatch pattern to select
-            videos.
-
         """
         data = data.lower()
 
@@ -1382,7 +1308,7 @@ class Behaviour(ABC):
             'spike_times',  # List of spike times per unit
             'spike_rate',   # Spike rate signals from convolved spike times
             'lfp',          # Raw/downsampled channels from probe (LFP)
-            'motion_index', # Motion index per ROI from the video
+            #'motion_index', # Motion indexes per ROI from the video
             'motion_tracking', # Motion tracking coordinates from DLC
         ]
         if data not in data_options:
@@ -1412,8 +1338,6 @@ class Behaviour(ABC):
             print(f"Aligning {data} data to trials.")
             if dlc_project:
                 values = self.get_motion_tracking_data(dlc_project)
-            elif data == "motion_index":
-                values = self.get_motion_index_data(video_match)
             else:
                 values = getattr(self, f"get_{data}_data")()
             sample_rate = self.sample_rate
@@ -1446,17 +1370,7 @@ class Behaviour(ABC):
             for start in trial_starts:
                 centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
                 if len(centre) == 0:
-                    # Previously it was assumed that if an event was not found within
-                    # scan_duration after the start of the action, that something went
-                    # wrong with the action labels calculation. This did not allow for
-                    # some actions to have events that other of the same actions did
-                    # not. Typically this is the case, but sometimes we want that
-                    # flexibility. As a compromise, we can print that this has happened
-                    # here to warn the user in case it is an error, while otherwise
-                    # continuing.
-                    #raise PixelsError('Action labels probably miscalculated')
-                    print("No event found for an action. If this is OK, ignore this.")
-                    continue
+                    raise PixelsError('Action labels probably miscalculated')
                 centre = start + centre[0]
                 centre = int(centre * sample_rate / self.sample_rate)
                 trial = values[rec_num][centre - half + 1:centre + half + 1]
@@ -1488,98 +1402,11 @@ class Behaviour(ABC):
         timepoints = np.linspace(start, duration / 2, points)
         ses_trials['time'] = pd.Series(timepoints, index=ses_trials.index)
         ses_trials = ses_trials.set_index('time')
-
-        if data == "motion_index":
-            ses_trials = ses_trials.rename_axis(columns=["ROI", "trial"])
-
         return ses_trials
-
-    def align_clips(self, label, event, video_match, duration=1):
-        """
-        Get video clips aligned to an event. This is very similar to align_trials but is
-        specific to video clips. The distinction is made for a number of reasons. Video
-        clip data gets very big and so is not cached to disk. It is also not loaded
-        here; this method only provides generators that can be used to consume video
-        frames as numpy arrays.
-
-        The parameters are the same as those for align_trials.
-        """
-        action_labels = self.get_action_labels()
-
-        scan_duration = self.sample_rate * 8
-        half = int((self.sample_rate * duration) / 2)
-        cursor = 0  # In sample points
-        i = -1
-        rec_trials = []
-        rec_durations = []
-
-        for rec_num, recording in enumerate(self.files):
-            for v, video in enumerate(recording.get('camera_data', [])):
-                avi = video.with_suffix('.avi')
-                if video_match in avi.as_posix():
-                    break
-            else:
-                raise PixelsError(f"Failed to find a video with match {video_match}")
-
-            path = self.find_file(avi)
-            actions = action_labels[rec_num][:, 0]
-            events = action_labels[rec_num][:, 1]
-            trial_starts = np.where(np.bitwise_and(actions, label))[0]
-
-            behavioural_data = ioutils.read_tdms(self.find_file(recording['behaviour']))
-            behavioural_data = behavioural_data["/'CamFrames'/'0'"]
-            behav_array = signal.resample(behavioural_data.values, 25000, self.sample_rate)
-            behavioural_data.iloc[:len(behav_array)] = np.squeeze(behav_array)
-            behavioural_data = behavioural_data[:len(behav_array)]
-            trigger = signal.binarise(behavioural_data).values
-            onsets = np.where((trigger[:-1] == 1) & (trigger[1:] == 0))[0]
-
-            # The last frame sometimes gets delayed a bit, so ignoring it, are the timestamp
-            # diffs fixed?
-            assert len(np.unique(np.diff(onsets[:-1]))) == 1
-
-            lag_start, _ = self._lag[rec_num]
-            onsets = onsets - lag_start
-            # Index is the time in ms relative to start of action labels
-            # Value is the frame number
-            timings = pd.DataFrame(range(len(onsets)), index=onsets, columns=["Frame"])
-
-            clips = []
-
-            for start in trial_starts:
-                centre = np.where(np.bitwise_and(events[start:start + scan_duration], event))[0]
-                if len(centre) == 0:
-                    print("No event found for an action. If this is OK, ignore this.")
-                    continue
-                centre = start + centre[0]
-                frames = timings.loc[
-                    (centre - half + 1 < timings.index) & (timings.index < centre + half + 1)
-                ]
-                rec_trials.append(
-                    ioutils.load_video_frames(path, np.squeeze(frames.values))
-                )
-                rec_durations.append(len(frames))
-
-        # This dataframe follows a different structure to others because the data is
-        # really a 3D matrix per trial. Here the row index is trials, and each value is
-        # a generator (ioutils.stream_video) that yields frames for that trial's period
-        # of time. Downstream code can do what it wants with those generators. Using
-        # generators means that debugging any code, both downstream code and this
-        # method, is relatively painless, and consuming the frame data only loads the
-        # frames that are actually needed, e.g. if you only need a few trials, this
-        # method is still good for that.
-        trials = pd.DataFrame(
-            {
-                "Generators": rec_trials,
-                "Durations": rec_durations,
-            },
-            index=range(len(rec_trials)),
-        )
-        return trials
 
     def get_cluster_info(self):
         if self._cluster_info is None:
-            info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
+            info_file = self.processed / f'sorted_stream_0' / 'cluster_info.tsv'
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
@@ -1627,9 +1454,9 @@ class Behaviour(ABC):
 
         if units:
             # defer to getting waveforms for all units
-            waveforms = self.get_spike_waveforms()[units]
-            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
-            return waveforms
+            waveforms = self.get_spike_waveforms()
+            assert 0, "WORK IN PROGRESS"
+            return
 
         units = self.select_units()
 
@@ -1639,8 +1466,7 @@ class Behaviour(ABC):
         model = load_model(paramspy)
         rec_forms = {}
 
-        for u, unit in enumerate(units):
-            print(100 * u / len(units), "% complete")
+        for unit in units:
             # get the waveforms from only the best channel
             spike_ids = model.get_cluster_spikes(unit)
             best_chan = model.get_cluster_channels(unit)[0]
