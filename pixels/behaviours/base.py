@@ -495,8 +495,11 @@ class Behaviour(ABC):
 
             with open(output, 'w') as fd:
                 json.dump(results, fd)
-
             print(f"Results of noise assessment is saved in {output}.")
+            np.save(
+                self.processed / f'lfp_samples_{rec_num}.npy',
+                sample,
+            )
 
     def extract_videos(self, force=False):
         """
