@@ -16,7 +16,7 @@ from scipy.ndimage import gaussian_filter1d
 from pixels import ioutils, PixelsError
 
 
-def resample(array, from_hz, to_hz, padtype=None):
+def resample(array, from_hz, to_hz, poly=False, padtype=None):
     """
     Resample an array from one sampling rate to another.
 
@@ -31,9 +31,10 @@ def resample(array, from_hz, to_hz, padtype=None):
     sample_rate : int or float, optional
         The resulting sample rate.
 
-    padtype : string, optional
-        How to deal with end effects. Default: 'minimum', where the resampling filter
-        pretends the ends are extended using the array's minimum.
+    poly : bool, choose the resample function.
+        If True, use scipy.signal.resample_poly; if False, use scipy.signal.resample.
+        Default is False.
+        lfp downsampling only works if using scipy.signal.resample.
 
     Returns
     -------
@@ -78,11 +79,24 @@ def resample(array, from_hz, to_hz, padtype=None):
     if chunks > 1:
         print(f"    0%", end="\r")
     current = 0
-    for _ in range(chunks):
+    for i in range(chunks):
         chunk_data = array[:, current:min(current + chunk_size, cols)]
-        result = scipy.signal.resample_poly(
-            chunk_data, up, down, axis=0, padtype=padtype or 'minimum'
-        )
+        if poly:
+            # matt's old poly func
+            result = scipy.signal.resample_poly(
+                block_data, up, down, padtype=padtype or 'minimum',
+            )
+        else:
+            # get number of samples given the new sample rate
+            samp_num=int(np.ceil(
+                array.shape[0]
+                * (up / down))
+            )
+            result = scipy.signal.resample(
+                chunk_data,
+                samp_num,
+                axis=0,
+            )
         new_data.append(result)
         current += chunk_size
         print(f"    {100 * current / cols:.1f}%", end="\r")
