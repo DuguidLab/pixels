@@ -412,21 +412,45 @@ class Behaviour(ABC):
             print("> Mapping LFP data")
             data = ioutils.read_bin(data_file, num_chans)
 
+            output = self.processed / recording['lfp_processed']
+            if output.exists():
+                continue
+
+            print("> Performing median subtraction across channels for each timepoint")
+            subtracted = signal.median_subtraction(data, axis=1)
+
             print(f"> Downsampling to {self.sample_rate} Hz")
-            data = signal.resample(data, orig_rate, self.sample_rate)
+            downsampled = signal.resample(subtracted, orig_rate, self.sample_rate)
+            sync_chan = downsampled[:, -1]
+            downsampled = downsampled[:, :-1]
 
             if self._lag[rec_num] is None:
                 self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
-            output = self.processed / recording['lfp_processed']
-            print(f"> Saving data to {output}")
+            sd = self.processed / f'lfp_sd_{rec_num}.json'
+            if sd.exists():
+                continue
+
+            SDs = []
+            for i in range(downsampled.shape[1]):
+                SDs.append(np.std(downsampled[:, i]))
+            results = dict(
+                median=np.median(SDs),
+                SDs=SDs,
+            )
+            print(f"> Saving standard deviation (and their median) of each channel")
+            with open(sd, 'w') as fd:
+                json.dump(results, fd)
+
             if lag_end < 0:
                 data = data[:lag_end]
             if lag_start < 0:
                 data = data[- lag_start:]
-            data = pd.DataFrame(data[:, :-1])
-            ioutils.write_hdf5(output, data)
+
+            print(f"> Saving median subtracted & downsampled LFP to {output}")
+            downsampled = pd.DataFrame(downsampled)
+            ioutils.write_hdf5(output, downsampled)
 
     def sort_spikes(self):
         """
@@ -459,38 +483,6 @@ class Behaviour(ABC):
             concat_rec = concat_rec.set_probe(probe)
             ss.run_kilosort3(recording=concat_rec, output_folder=output)
 
-    def assess_noise(self):
-        """
-        Assess noise in the raw AP data.
-        """
-        for rec_num, recording in enumerate(self.files):
-            print(
-                f">>>>> Assessing noise for recording {rec_num + 1} of {len(self.files)}"
-            )
-            output = self.processed / f'noise_{rec_num}.json'
-            if output.exists():
-                continue
-
-            data_file = self.find_file(recording['spike_data'])
-            num_chans = self.spike_meta[rec_num]['nSavedChans']
-            data = ioutils.read_bin(data_file, num_chans)
-
-            # sample some points -- it takes too long to use them all
-            length = data.shape[0]
-            points = np.random.choice(range(length), length // 60, replace=False)
-            sample = data[points, :-1]
-            median = np.median(sample, axis=1)
-            SDs = []
-            for i in range(384):
-                SDs.append(np.std(sample[:, i] - median))
-
-            results = dict(
-                median=np.median(SDs),
-                SDs=SDs,
-            )
-
-            with open(output, 'w') as fd:
-                json.dump(results, fd)
 
     def extract_videos(self, force=False):
         """
