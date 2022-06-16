@@ -88,11 +88,12 @@ class Events:
 
     # Timepoints determined from motion tracking
     reach_onset = 1 << 2
-    reach_offset = 1 << 3
+    slit_in = 1 << 3
     grasp = 1 << 4
-    reach_onset_subsequent = 1 << 5  # The SECOND full reach on a clean correct trial only
-    reach_offset_subsequent = 1 << 6
-    grasp_subsequent = 1 << 7
+    slit_out = 1 << 5
+    subsequent_slit_in = 1 << 6  # The SECOND full reach on a clean correct trial only
+    subsequent_grasp = 1 << 7
+    subsequent_slit_out = 1 << 8
 
 
 # These are used to convert the trial data into Actions and Events
