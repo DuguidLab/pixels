@@ -16,7 +16,7 @@ from scipy.ndimage import gaussian_filter1d
 from pixels import ioutils, PixelsError
 
 
-def resample(array, from_hz, to_hz, poly=True, padtype=None):
+def resample(array, from_hz, to_hz, poly=False, padtype=None):
     """
     Resample an array from one sampling rate to another.
 
@@ -79,7 +79,7 @@ def resample(array, from_hz, to_hz, poly=True, padtype=None):
     if chunks > 1:
         print(f"    0%", end="\r")
     current = 0
-    for _ in range(chunks):
+    for i in range(chunks):
         chunk_data = array[:, current:min(current + chunk_size, cols)]
         if poly:
             # matt's old poly func
