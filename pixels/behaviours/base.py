@@ -420,14 +420,15 @@ class Behaviour(ABC):
             subtracted = signal.median_subtraction(data, axis=1)
 
             print(f"> Downsampling to {self.sample_rate} Hz")
-            downsampled = signal.resample(subtracted, orig_rate, self.sample_rate)
+            downsampled = signal.resample(subtracted, orig_rate, self.sample_rate, False)
             sync_chan = downsampled[:, -1]
             downsampled = downsampled[:, :-1]
 
+            """
             if self._lag[rec_num] is None:
                 self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
-
+            """
             sd = self.processed / recording['lfp_sd']
             if sd.exists():
                 continue
@@ -443,11 +444,12 @@ class Behaviour(ABC):
             with open(sd, 'w') as fd:
                 json.dump(results, fd)
 
+            """
             if lag_end < 0:
                 data = data[:lag_end]
             if lag_start < 0:
                 data = data[- lag_start:]
-
+            """
             print(f"> Saving median subtracted & downsampled LFP to {output}")
             # save in .npy format
             np.save(
