@@ -111,6 +111,7 @@ def get_data_files(data_dir, session_name):
         recording['lfp_sd'] = recording['lfp_data'].with_name(
             recording['lfp_data'].stem + '_sd.json'
         )
+        recording['clustered_channels'] = Path(f'channel_clustering_results_{num}.h5')
         files.append(recording)
 
     return files
