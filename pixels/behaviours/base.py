@@ -428,7 +428,7 @@ class Behaviour(ABC):
                 self.sync_data(rec_num, sync_channel=data[:, -1])
             lag_start, lag_end = self._lag[rec_num]
 
-            sd = self.processed / f'lfp_sd_{rec_num}.json'
+            sd = self.processed / recording['lfp_sd']
             if sd.exists():
                 continue
 
@@ -449,8 +449,14 @@ class Behaviour(ABC):
                 data = data[- lag_start:]
 
             print(f"> Saving median subtracted & downsampled LFP to {output}")
-            downsampled = pd.DataFrame(downsampled)
-            ioutils.write_hdf5(output, downsampled)
+            # save in .npy format
+            np.save(
+                file=output,
+                arr=downsampled,
+                allow_pickle=True,
+            )
+            #downsampled = pd.DataFrame(downsampled)
+            #ioutils.write_hdf5(output, downsampled)
 
     def sort_spikes(self):
         """
