@@ -106,7 +106,10 @@ def get_data_files(data_dir, session_name):
         )
         recording['spike_rate_processed'] = Path(f'spike_rate_{num}.h5')
         recording['lfp_processed'] = recording['lfp_data'].with_name(
-            recording['lfp_data'].stem + '_processed.h5'
+            recording['lfp_data'].stem + '_processed.npy'
+        )
+        recording['lfp_sd'] = recording['lfp_data'].with_name(
+            recording['lfp_data'].stem + '_sd.json'
         )
         files.append(recording)
 
