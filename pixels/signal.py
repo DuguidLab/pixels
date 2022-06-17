@@ -16,7 +16,7 @@ from scipy.ndimage import gaussian_filter1d
 from pixels import ioutils, PixelsError
 
 
-def resample(array, from_hz, to_hz, poly=False, padtype=None):
+def resample(array, from_hz, to_hz, poly=True, padtype=None):
     """
     Resample an array from one sampling rate to another.
 
