@@ -114,6 +114,9 @@ def get_data_files(data_dir, session_name):
         recording['clustered_channels'] = recording['lfp_data'].with_name(
             f'channel_clustering_results_{num}.h5'
         )
+        recording['depth_info'] = recording['lfp_data'].with_name(
+            f'depth_info_{num}.json'
+        )
         files.append(recording)
 
     return files
