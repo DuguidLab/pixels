@@ -84,7 +84,7 @@ def resample(array, from_hz, to_hz, poly=True, padtype=None):
         if poly:
             # matt's old poly func
             result = scipy.signal.resample_poly(
-                block_data, up, down, padtype=padtype or 'minimum',
+                chunk_data, up, down, axis=0, padtype=padtype or 'minimum',
             )
         else:
             # get number of samples given the new sample rate
