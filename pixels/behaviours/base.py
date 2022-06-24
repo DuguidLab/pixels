@@ -8,10 +8,12 @@ from __future__ import annotations
 import functools
 import json
 import os
+import glob
 import pickle
 import shutil
 import tarfile
 import tempfile
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
@@ -138,6 +140,10 @@ class Behaviour(ABC):
             self.interim = self.data_dir / 'interim' / self.name
         else:
             self.interim = Path(interim_dir) / self.name
+
+        self.catGT_dir = glob.glob(
+            str(self.interim) +'/' + f'catgt_{self.name}_g[0-9]'
+        )
 
         self.interim.mkdir(parents=True, exist_ok=True)
         self.processed.mkdir(parents=True, exist_ok=True)
@@ -477,32 +483,42 @@ class Behaviour(ABC):
             #downsampled = pd.DataFrame(downsampled)
             #ioutils.write_hdf5(output, downsampled)
 
+    
     def sort_spikes(self):
         """
         Run kilosort spike sorting on raw spike data.
         """
         streams = {}
 
-        for rec_num, files in enumerate(self.files):
-            data_file = self.find_file(files['spike_data'])
-            assert data_file, f"Spike data not found for {files['spike_data']}."
-
-            stream_id = data_file.as_posix()[-12:-4]
-            if stream_id not in streams:
+        for _, files in enumerate(self.files):
+            if len(self.catGT_dir) == 0:
+                print(f"> Spike data not found for {files['catGT_ap_data']},\
+                    \nuse the orignial spike data.")
+                data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
-                streams[stream_id] = metadata
+            else:
+                self.catGT_dir = Path(self.catGT_dir[0])
+                data_file = self.catGT_dir / files['catGT_ap_data']
+                metadata = self.catGT_dir / files['catGT_ap_meta']
+
+        stream_id = data_file.as_posix()[-12:-4]
+        if stream_id not in streams:
+            streams[stream_id] = metadata
 
         for stream_num, stream in enumerate(streams.items()):
             stream_id, metadata = stream
             try:
-                recording = se.SpikeGLXRecordingExtractor(self.interim, stream_id=stream_id)
+                recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
             except ValueError as e:
                 raise PixelsError(
                     f"Did the raw data get fully copied to interim? Full error: {e}"
                 )
 
             print("> Running kilosort")
-            output = self.processed / f'sorted_stream_{stream_num}'
+            if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
+                output = self.processed / f'sorted_stream_cat_{stream_num}'
+            else:
+                output = self.processed / f'sorted_stream_{stream_num}'
             concat_rec = si.concatenate_recordings([recording])
             probe = pi.read_spikeglx(metadata.as_posix())
             concat_rec = concat_rec.set_probe(probe)

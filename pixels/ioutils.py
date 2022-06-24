@@ -117,6 +117,8 @@ def get_data_files(data_dir, session_name):
         recording['depth_info'] = recording['lfp_data'].with_name(
             f'depth_info_{num}.json'
         )
+        recording['catGT_ap_data'] = str(recording['spike_data']).replace("t0", "tcat")
+        recording['catGT_ap_meta'] = str(recording['spike_meta']).replace("t0", "tcat") 
         files.append(recording)
 
     return files
