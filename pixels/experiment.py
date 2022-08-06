@@ -4,6 +4,7 @@ data and run subsequent analyses.
 """
 
 
+from itertools import islice
 from operator import attrgetter, itemgetter
 from pathlib import Path
 
@@ -218,11 +219,14 @@ class Experiment:
         """
         trials = {}
         for i, session in enumerate(self.sessions):
+            result = None
             if units:
                 if units[i]:
-                    trials[i] = session.align_trials(*args, units=units[i], **kwargs)
+                    result = session.align_trials(*args, units=units[i], **kwargs)
             else:
-                trials[i] = session.align_trials(*args, **kwargs)
+                result = session.align_trials(*args, **kwargs)
+            if result is not None:
+                trials[i] = result
 
         if "motion_tracking" in args:
             df = pd.concat(
@@ -235,7 +239,7 @@ class Experiment:
             df = pd.concat(
                 trials.values(), axis=1, copy=False,
                 keys=trials.keys(),
-                names=["session"] + trials[0].columns.names,
+                names=["session"] + list(trials.values())[0].columns.names,
             )
 
         return df

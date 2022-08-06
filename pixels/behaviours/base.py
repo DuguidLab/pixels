@@ -27,6 +27,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 from scipy import interpolate
+from tables import HDF5ExtError
 
 from pixels import ioutils
 from pixels import signal
@@ -48,24 +49,40 @@ def _cacheable(method):
     instance of `SelectedUnits` then this is disabled.
     """
     def func(*args, **kwargs):
+        name = kwargs.pop("name", None)
+
         if "units" in kwargs:
             units = kwargs["units"]
             if not isinstance(units, SelectedUnits) or not hasattr(units, "name"):
                 return method(*args, **kwargs)
 
-        as_list = list(args) + list(kwargs.values())
-        self = as_list.pop(0)
+        self, *as_list = list(args) + list(kwargs.values())
         if not self._use_cache:
             return method(*args, **kwargs)
+
+        arrays = [i for i, arg in enumerate(as_list) if isinstance(arg, np.ndarray)]
+        if arrays:
+            if name is None:
+                raise PixelsError(
+                    'Cacheing methods when passing arrays requires also passing name="something"'
+                )
+            for i in arrays:
+                as_list[i] = name
 
         as_list.insert(0, method.__name__)
         output = self.interim / 'cache' / ('_'.join(str(i) for i in as_list) + '.h5')
         if output.exists() and self._use_cache != "overwrite":
-            df = ioutils.read_hdf5(output)
+            try:
+                df = ioutils.read_hdf5(output)
+            except HDF5ExtError:
+                df = None
         else:
             df = method(*args, **kwargs)
             output.parent.mkdir(parents=True, exist_ok=True)
-            ioutils.write_hdf5(output, df)
+            if df is None:
+                output.touch()
+            else:
+                ioutils.write_hdf5(output, df)
         return df
     return func
 
@@ -1178,10 +1195,14 @@ class Behaviour(ABC):
                     tdf.append(udf)
 
                 assert len(tdf) == len(units)
-                tdfc = pd.concat(tdf, axis=1)
-                if rate:
-                    tdfc = signal.convolve(tdfc, duration * 1000, sigma)
-                rec_trials[i] = tdfc
+                if tdf:
+                    tdfc = pd.concat(tdf, axis=1)
+                    if rate:
+                        tdfc = signal.convolve(tdfc, duration * 1000, sigma)
+                    rec_trials[i] = tdfc
+
+        if not rec_trials:
+            return None
 
         trials = pd.concat(rec_trials, axis=1, names=["trial", "unit"])
         trials = trials.reorder_levels(["unit", "trial"], axis=1)
@@ -1603,7 +1624,6 @@ class Behaviour(ABC):
         for unit in waveforms.columns.get_level_values('unit').unique():
             u_widths = []
             u_spikes = waveforms[unit]
-            assert 0, "WORK IN PROGRESS"
 
             for s in u_spikes:
                 spike = u_spikes[s]
@@ -1684,14 +1704,20 @@ class Behaviour(ABC):
         event : Event int
             Event to align to, from a specific behaviour's Events class.
 
-        start : float, optional
+        start : float or np.ndarray, optional
             Time in milliseconds relative to event for the left edge of the bins.
+            Alternatively, this can be an array of times in milliseconds, one per trial,
+            to us per-trial start times. `step` is ignored in this case. As the
+            timepoints pertain to only one session, using this via `Experiment`
+            doesn't make sense.
 
         step : float, optional
             Time in milliseconds for the bin size.
 
-        end : float, optional
+        end : float or np.ndarray, optional
             Time in milliseconds relative to event for the right edge of the bins.
+            Alternatively, this can be an array of times in milliseconds, one per trial,
+            to us per-trial end times. `step` is ignored in this case.
 
         bl_label, bl_event, bl_start, bl_end : as above, all optional
             Equivalent to the above parameters but for baselining data. By default no
@@ -1715,31 +1741,74 @@ class Behaviour(ABC):
             Time in milliseconds of sigma of gaussian kernel to use. Default is 50 ms.
 
         """
-        # Set timepoints to 3 decimal places (ms) to make things easier
-        start = round(start, 3)
-        step = round(step, 3)
-        end = round(end, 3)
         if bl_start is not None:
             bl_start = round(bl_start, 3)
         bl_end = round(bl_end, 3)
+
+        # Set timepoints to 3 decimal places (ms) to make things easier
+        if isinstance(start, float):
+            start = round(start, 3)
+        if isinstance(end, float):
+            end = round(end, 3)
+
+        if isinstance(end, np.ndarray) or isinstance(start, np.ndarray):
+            # We only use step and bin data when we aren't passing in arrays of
+            # timepoints.
+            step = None
+        else:
+            step = round(step, 3)
+
+        max_start = abs(start) if isinstance(start, float) else np.abs(start).max()
+        max_end = abs(end) if isinstance(end, float) else np.abs(end).max()
+        duration = round(2 * max(max_start, max_end) + 0.002, 3)
+
         # Get firing rates
-        duration = round(2 * max(abs(start), abs(end)) + 0.002, 3)
         responses = self.align_trials(
             label, event, 'spike_rate', duration=duration, sigma=sigma, units=units
         )
+        if responses is None:
+            return None
         series = responses.index.values
-        assert series[0] <= start < end <= series[-1] + 0.001
 
-        bins = round((end - start) / step, 10)  # Round in case of floating point recursive
-        assert bins.is_integer()
-        bin_responses = []
+        if step is None:
+            trials = responses.columns.get_level_values("trial").unique()
+            if isinstance(start, float):
+                assert series[0] <= start <= series[-1]
+                start = np.full(trials.shape, start)
+            elif isinstance(end, float):
+                assert series[0] <= end <= series[-1]
+                end = np.full(trials.shape, end)
 
-        for i in range(int(bins)):
-            bin_start = start + i * step
-            bin_end = bin_start + step
-            bin_responses.append(responses.loc[bin_start : bin_end].mean())
+            responses = responses.swaplevel(axis=1)
+            trial_responses = []
+            for trial, t_start, t_end in zip(trials, start, end):
+                if not (t_start < t_end):
+                    print(
+                        f"Warning: trial {trial} skipped in CI calculation due to bad timepoints"
+                    )
+                    continue
+                trial_responses.append(
+                    responses[trial].loc[t_start:t_end].mean()
+                )
+                assert not responses[trial].loc[t_start:t_end].mean().isna().any()
 
-        averages = pd.concat(bin_responses, axis=1)
+            averages = pd.concat(trial_responses, axis=1, keys=trials)
+            averages = averages.melt(ignore_index=False).rename(dict(value=0), axis=1)
+            averages = averages.set_index("trial", append=True).sort_index()
+
+        else:
+            assert series[0] <= start < end <= series[-1] + 0.001
+
+            bins = round((end - start) / step, 10)  # Round in case of floating point recursive
+            assert bins.is_integer()
+            bin_responses = []
+
+            for i in range(int(bins)):
+                bin_start = start + i * step
+                bin_end = bin_start + step
+                bin_responses.append(responses.loc[bin_start : bin_end].mean())
+
+            averages = pd.concat(bin_responses, axis=1)
 
         # Optionally baseline the firing rates
         if bl_start is not None and bl_end is not None:
