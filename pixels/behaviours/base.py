@@ -1214,7 +1214,7 @@ class Behaviour(ABC):
             start = (- duration / 2) + (duration / points)
             # Having trouble with float values
             #timepoints = np.linspace(start, duration / 2, points, dtype=np.float64)
-            timepoints = list(range(int(start * 1000), int(duration * 1000 / 2) + 1))
+            timepoints = list(range(round(start * 1000), int(duration * 1000 / 2) + 1))
             trials['time'] = pd.Series(timepoints, index=trials.index) / 1000
             trials = trials.set_index('time')
             trials = trials.iloc[self.sample_rate : - self.sample_rate]
