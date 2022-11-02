@@ -497,6 +497,7 @@ class Behaviour(ABC):
                 data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
             else:
+                print("> Sorting catgt-ed spikes")
                 self.catGT_dir = Path(self.catGT_dir[0])
                 data_file = self.catGT_dir / files['catGT_ap_data']
                 metadata = self.catGT_dir / files['catGT_ap_meta']
@@ -1118,14 +1119,19 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
-    def _get_spike_times(self):
+    def _get_spike_times(self, catgt=False):
         """
         Returns the sorted spike times.
         """
         saved = self._spike_times_data
         if saved[0] is None:
-            times = self.processed / f'sorted_stream_0' / 'spike_times.npy'
-            clust = self.processed / f'sorted_stream_0' / 'spike_clusters.npy'
+            # TODO: temporarily add catgt arg here, 
+            if catgt:
+                stream = 'sorted_stream_cat_0'
+            else:
+                stream = 'sorted_stream_0'
+            times = self.processed / stream / f'spike_times.npy'
+            clust = self.processed / stream / f'spike_clusters.npy'
 
             try:
                 times = np.load(times)
@@ -1139,8 +1145,18 @@ class Behaviour(ABC):
             by_clust = {}
 
             for c in np.unique(clust):
-                by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
+                c_times = times[clust == c]
+                uniques, counts = np.unique(
+                    c_times,
+                    return_counts=True,
+                )
+                repeats = c_times[np.where(counts>1)]
+                if len(repeats>1):
+                    print(f"> removed {len(repeats)} double-counted spikes from cluster {c}.")
+
+                by_clust[c] = pd.Series(uniques)
             saved[0]  = pd.concat(by_clust, axis=1, names=['unit'])
+            assert 0
         return saved[0]
 
     def _get_aligned_spike_times(
