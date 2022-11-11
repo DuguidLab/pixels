@@ -521,7 +521,12 @@ class Behaviour(ABC):
             concat_rec = si.concatenate_recordings([recording])
             probe = pi.read_spikeglx(metadata.as_posix())
             concat_rec = concat_rec.set_probe(probe)
-            ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+            #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+            ks3_output = ss.run_sorter(
+                sorter_name='kilosort3',
+                recording=concat_rec,
+                output_folder=output,
+            )
 
             # remove empty units
             ks3_no_empt = ks3_output.remove_empty_units()
@@ -529,12 +534,14 @@ class Behaviour(ABC):
 
             # remove redundant units by keeping minimum shift, highest_amplitude, or
             # max_spikes
-            sc.remove_redundant_units(
+            ks3_output = sc.remove_redundant_units(
                 ks3_no_empt,
                 WaveformExtractor, # spike trains realigned using the peak shift in template
                 duplicate_threshold=0.9, # default is 0.8
                 remove_strategy='minimum_shift', # keep unit with best peak alignment
             )
+            # save spikeinterface sorting object for easier loading
+            ks3_output.save(folder=output / 'saved_si_sorting_obj')
             assert 0
 
 
@@ -1729,9 +1736,7 @@ class Behaviour(ABC):
         return df
 
     def get_spike_waveforms_si(self, units=None):
-        import spikeinterface as si
-        import spikeinterface.extractors as se
-
+        streams = {}
         # set chunks
         job_kwargs = dict(
             n_jobs=10,
@@ -1739,20 +1744,46 @@ class Behaviour(ABC):
             progress_bar=True,
         )
 
-        # read raw spikeglx recordings from interim
-        recording = se.SpikeGlxrRecordingExtractor(folder_path=self.interim)
-        assert 0
+        for rec_num, files in enumerate(self.files):
+            data_file = self.find_file(files['spike_data'])
+            assert data_file, f"Spike data not found for {files['spike_data']}."
+
+            stream_id = data_file.as_posix()[-12:-4]
+            if stream_id not in streams:
+                metadata = self.find_file(files['spike_meta'])
+                streams[stream_id] = metadata
+
+        for stream_num, stream in enumerate(streams.items()):
+            stream_id, metadata = stream
+            try:
+                recording = se.SpikeGLXRecordingExtractor(self.interim, stream_id=stream_id)
+            except ValueError as e:
+                raise PixelsError(
+                    f"Did the raw data get fully copied to interim? Full error: {e}"
+                )
+            try:
+                sorting = se.NpzSortingExtractor(
+                    self.processed / 'sorted_stream_{stream_num}/saved_si_sorting_obj',
+                )
+            except ValueError as e:
+                raise PixelsError(
+                    f"Have you run spike sorting? Full error: {e}"
+                )
 
         # extract waveforms
         waveforms = si.extract_waveforms(
-            self.interim,
-            folder=self.processed / 'sorted_stream_0' /, 
+            recording=recording,
+            sorting=sorting, 
+            folder=self.interim/ 'cache',
             load_if_exists=True, # load extracted if available
             max_spikes_per_unit=None,
             overwrite=False,
             **job_kwargs,
         )
+        assert 0
 
+        """
+        # Matt's stuff
         if units:
             # defer to getting waveforms for all units
             waveforms = self.get_spike_waveforms()[units]
@@ -1788,6 +1819,7 @@ class Behaviour(ABC):
         rate = 1000 / int(self.spike_meta[0]['imSampRate'])
         df.index = df.index * rate
         return df
+        """
 
     @_cacheable
     def get_aligned_spike_rate_CI(
