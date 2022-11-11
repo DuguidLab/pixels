@@ -542,6 +542,7 @@ class Behaviour(ABC):
             )
             # save spikeinterface sorting object for easier loading
             ks3_output.save(folder=output / 'saved_si_sorting_obj')
+            #TODO: export_to_phy
             assert 0
 
 
