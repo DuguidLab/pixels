@@ -28,6 +28,7 @@ import scipy.stats
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
+import spikeinterface.curation as sc
 from scipy import interpolate
 from tables import HDF5ExtError
 
@@ -520,7 +521,21 @@ class Behaviour(ABC):
             concat_rec = si.concatenate_recordings([recording])
             probe = pi.read_spikeglx(metadata.as_posix())
             concat_rec = concat_rec.set_probe(probe)
-            ss.run_kilosort3(recording=concat_rec, output_folder=output)
+            ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+
+            # remove empty units
+            ks3_no_empt = ks3_output.remove_empty_units()
+            print(f'KS3 found {len(ks3_no_empt.get_unit_ids())} non-empty units.')
+
+            # remove redundant units by keeping minimum shift, highest_amplitude, or
+            # max_spikes
+            sc.remove_redundant_units(
+                ks3_no_empt,
+                WaveformExtractor, # spike trains realigned using the peak shift in template
+                duplicate_threshold=0.9, # default is 0.8
+                remove_strategy='minimum_shift', # keep unit with best peak alignment
+            )
+            assert 0
 
 
     def extract_videos(self, force=False):
@@ -1676,6 +1691,67 @@ class Behaviour(ABC):
     def get_spike_waveforms(self, units=None):
         from phylib.io.model import load_model
         from phylib.utils.color import selected_cluster_color
+
+        if units:
+            # defer to getting waveforms for all units
+            waveforms = self.get_spike_waveforms()[units]
+            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
+            return waveforms
+
+        units = self.select_units()
+
+        paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+        if not paramspy.exists():
+            raise PixelsError(f"{self.name}: params.py not found")
+        model = load_model(paramspy)
+        rec_forms = {}
+
+        for u, unit in enumerate(units):
+            print(100 * u / len(units), "% complete")
+            # get the waveforms from only the best channel
+            spike_ids = model.get_cluster_spikes(unit)
+            best_chan = model.get_cluster_channels(unit)[0]
+            u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+            if u_waveforms is None:
+                raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
+            rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+
+        assert rec_forms
+
+        df = pd.concat(
+            rec_forms,
+            axis=1,
+            names=['unit', 'spike']
+        )
+        # convert indexes to ms
+        rate = 1000 / int(self.spike_meta[0]['imSampRate'])
+        df.index = df.index * rate
+        return df
+
+    def get_spike_waveforms_si(self, units=None):
+        import spikeinterface as si
+        import spikeinterface.extractors as se
+
+        # set chunks
+        job_kwargs = dict(
+            n_jobs=10,
+            chunk_duration="1s",
+            progress_bar=True,
+        )
+
+        # read raw spikeglx recordings from interim
+        recording = se.SpikeGlxrRecordingExtractor(folder_path=self.interim)
+        assert 0
+
+        # extract waveforms
+        waveforms = si.extract_waveforms(
+            self.interim,
+            folder=self.processed / 'sorted_stream_0' /, 
+            load_if_exists=True, # load extracted if available
+            max_spikes_per_unit=None,
+            overwrite=False,
+            **job_kwargs,
+        )
 
         if units:
             # defer to getting waveforms for all units
