@@ -29,6 +29,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.curation as sc
+import spikeinterface.exporters as sexp
 from scipy import interpolate
 from tables import HDF5ExtError
 
@@ -487,6 +488,12 @@ class Behaviour(ABC):
         Run kilosort spike sorting on raw spike data.
         """
         streams = {}
+        # set chunks
+        job_kwargs = dict(
+            n_jobs=10, # -1: num of job equals num of cores
+            chunk_duration="1s",
+            progress_bar=True,
+        )
 
         for _, files in enumerate(self.files):
             if len(self.catGT_dir) == 0:
@@ -542,7 +549,27 @@ class Behaviour(ABC):
             )
             # save spikeinterface sorting object for easier loading
             ks3_output.save(folder=output / 'saved_si_sorting_obj')
-            #TODO: export_to_phy
+
+            # extract waveforms
+            waveforms = si.extract_waveforms(
+                recording=concat_rec,
+                sorting=ks3_output, 
+                folder=self.interim/ 'cache',
+                load_if_exists=True, # load extracted if available
+                max_spikes_per_unit=None,
+                overwrite=False,
+                **job_kwargs,
+            )
+
+            # export_to_phy
+            sexp.export_to_phy(
+                waveform_extractor=waveforms,
+                output_folder=output / "phy_ks3",
+                compute_pc_features=True,
+                compute_amplitudes=True,
+                copy_binary=True,
+                **job_kwargs,
+            )
             assert 0
 
 
@@ -1735,92 +1762,6 @@ class Behaviour(ABC):
         rate = 1000 / int(self.spike_meta[0]['imSampRate'])
         df.index = df.index * rate
         return df
-
-    def get_spike_waveforms_si(self, units=None):
-        streams = {}
-        # set chunks
-        job_kwargs = dict(
-            n_jobs=10,
-            chunk_duration="1s",
-            progress_bar=True,
-        )
-
-        for rec_num, files in enumerate(self.files):
-            data_file = self.find_file(files['spike_data'])
-            assert data_file, f"Spike data not found for {files['spike_data']}."
-
-            stream_id = data_file.as_posix()[-12:-4]
-            if stream_id not in streams:
-                metadata = self.find_file(files['spike_meta'])
-                streams[stream_id] = metadata
-
-        for stream_num, stream in enumerate(streams.items()):
-            stream_id, metadata = stream
-            try:
-                recording = se.SpikeGLXRecordingExtractor(self.interim, stream_id=stream_id)
-            except ValueError as e:
-                raise PixelsError(
-                    f"Did the raw data get fully copied to interim? Full error: {e}"
-                )
-            try:
-                sorting = se.NpzSortingExtractor(
-                    self.processed / 'sorted_stream_{stream_num}/saved_si_sorting_obj',
-                )
-            except ValueError as e:
-                raise PixelsError(
-                    f"Have you run spike sorting? Full error: {e}"
-                )
-
-        # extract waveforms
-        waveforms = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting, 
-            folder=self.interim/ 'cache',
-            load_if_exists=True, # load extracted if available
-            max_spikes_per_unit=None,
-            overwrite=False,
-            **job_kwargs,
-        )
-        assert 0
-
-        """
-        # Matt's stuff
-        if units:
-            # defer to getting waveforms for all units
-            waveforms = self.get_spike_waveforms()[units]
-            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
-            return waveforms
-
-        units = self.select_units()
-
-        paramspy = self.processed / 'sorted_stream_0' / 'params.py'
-        if not paramspy.exists():
-            raise PixelsError(f"{self.name}: params.py not found")
-        model = load_model(paramspy)
-        rec_forms = {}
-
-        for u, unit in enumerate(units):
-            print(100 * u / len(units), "% complete")
-            # get the waveforms from only the best channel
-            spike_ids = model.get_cluster_spikes(unit)
-            best_chan = model.get_cluster_channels(unit)[0]
-            u_waveforms = model.get_waveforms(spike_ids, [best_chan])
-            if u_waveforms is None:
-                raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
-            rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
-
-        assert rec_forms
-
-        df = pd.concat(
-            rec_forms,
-            axis=1,
-            names=['unit', 'spike']
-        )
-        # convert indexes to ms
-        rate = 1000 / int(self.spike_meta[0]['imSampRate'])
-        df.index = df.index * rate
-        return df
-        """
 
     @_cacheable
     def get_aligned_spike_rate_CI(
