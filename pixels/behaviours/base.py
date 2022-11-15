@@ -495,6 +495,9 @@ class Behaviour(ABC):
             progress_bar=True,
         )
 
+        #TODO: consider to put catgt here
+
+        # find spike data to sort
         for _, files in enumerate(self.files):
             if len(self.catGT_dir) == 0:
                 print(f"> Spike data not found for {files['catGT_ap_data']},\
@@ -515,31 +518,93 @@ class Behaviour(ABC):
             stream_id, metadata = stream
             try:
                 recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
+                # this recording is filtered
+                recording.annotate(is_filtered=True)
             except ValueError as e:
                 raise PixelsError(
                     f"Did the raw data get fully copied to interim? Full error: {e}"
                 )
 
-            print("> Running kilosort")
+            # find spike sorting output folder
             if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
                 output = self.processed / f'sorted_stream_cat_{stream_num}'
             else:
                 output = self.processed / f'sorted_stream_{stream_num}'
-            concat_rec = si.concatenate_recordings([recording])
-            probe = pi.read_spikeglx(metadata.as_posix())
-            concat_rec = concat_rec.set_probe(probe)
-            #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
-            ks3_output = ss.run_sorter(
-                sorter_name='kilosort3',
-                recording=concat_rec,
-                output_folder=output,
-            )
 
-            # remove empty units
-            ks3_no_empt = ks3_output.remove_empty_units()
-            print(f'KS3 found {len(ks3_no_empt.get_unit_ids())} non-empty units.')
+            #TODO
+            try: 
+                ks3_output = si.load_extractor(output)
+                print("> This session is already sorted, now it is loaded.") 
+                assert 0
+            except:
+                print("> Running kilosort")
+                # concatenate recording segments
+                concat_rec = si.concatenate_recordings([recording])
+                probe = pi.read_spikeglx(metadata.as_posix())
+                concat_rec = concat_rec.set_probe(probe)
+                # annotate spike data is filtered
+                concat_rec.annotate(is_filtered=True)
 
-            # remove redundant units by keeping minimum shift, highest_amplitude, or
+                # for testing: get first 5 mins of the recording 
+                fs = concat_rec.get_sampling_frequency()
+                test = concat_rec.frame_slice(
+                    start_frame=0*fs,
+                    end_frame=300*fs,
+                )
+                test.annotate(is_filtered=True)
+                # check all annotations
+                test.get_annotation('is_filtered')
+                print(test)
+
+                #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+                ks3_output = ss.run_sorter(
+                    sorter_name='kilosort3',
+                    #recording=concat_rec,
+                    recording=test, # for testing
+                    output_folder=output,
+                    #remove_existing_folder=False,
+                    **job_kwargs,
+                )
+
+                # remove empty units
+                ks3_output = ks3_output.remove_empty_units()
+                print(f'KS3 found {len(ks3_no_empt.get_unit_ids())} non-empty units.')
+
+                """
+                #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
+                ks3_output = sc.remove_duplicated_spikes(
+                    sorting=ks3_no_empt,
+                    censored_period_ms=0.3, #ms
+                    method='keep_first', # keep first spike, remove the second
+                )
+                """
+                # save spikeinterface sorting object for easier loading
+                ks3_output.save(folder=output / 'saved_si_sorting_obj')
+
+            try:
+                waveforms = si.WaveformExtractor.load_from_folder(
+                    folder=self.interim / 'cache',
+                    sorting=ks3_output,
+                )
+                print("> Waveforms extracted, now it is loaded.")
+            except:
+                print("> Waveforms not extracted, extracting now.")
+                # extract waveforms
+                waveforms = si.extract_waveforms(
+                    #recording=concat_rec,
+                    recording=test, # for testing
+                    sorting=ks3_output,
+                    folder=self.interim / 'cache',
+                    load_if_exists=True, # load extracted if available
+                    #load_if_exists=False, # re-calculate everytime
+                    max_spikes_per_unit=None, # extract all waveforms
+                    overwrite=False,
+                    **job_kwargs,
+                )
+                assert 0
+
+            """
+            # TODO: remove redundant units by keeping minimum shift, highest_amplitude, or
             # max_spikes
             ks3_output = sc.remove_redundant_units(
                 ks3_no_empt,
@@ -547,27 +612,16 @@ class Behaviour(ABC):
                 duplicate_threshold=0.9, # default is 0.8
                 remove_strategy='minimum_shift', # keep unit with best peak alignment
             )
-            # save spikeinterface sorting object for easier loading
-            ks3_output.save(folder=output / 'saved_si_sorting_obj')
+            """
 
-            # extract waveforms
-            waveforms = si.extract_waveforms(
-                recording=concat_rec,
-                sorting=ks3_output, 
-                folder=self.interim/ 'cache',
-                load_if_exists=True, # load extracted if available
-                max_spikes_per_unit=None,
-                overwrite=False,
-                **job_kwargs,
-            )
-
-            # export_to_phy
+            # TODO
             sexp.export_to_phy(
                 waveform_extractor=waveforms,
                 output_folder=output / "phy_ks3",
                 compute_pc_features=True,
                 compute_amplitudes=True,
                 copy_binary=True,
+                remove_if_exists=True, # load if already exported to phy
                 **job_kwargs,
             )
             assert 0
@@ -1723,45 +1777,134 @@ class Behaviour(ABC):
         return df
 
     @_cacheable
-    def get_spike_waveforms(self, units=None):
-        from phylib.io.model import load_model
-        from phylib.utils.color import selected_cluster_color
+    def get_spike_waveforms(self, units=None, method='phy'):
+        if method == 'phy':
+            from phylib.io.model import load_model
+            from phylib.utils.color import selected_cluster_color
 
-        if units:
-            # defer to getting waveforms for all units
-            waveforms = self.get_spike_waveforms()[units]
-            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
-            return waveforms
+            if units:
+                # defer to getting waveforms for all units
+                waveforms = self.get_spike_waveforms()[units]
+                assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
+                return waveforms
 
-        units = self.select_units()
+            units = self.select_units()
 
-        paramspy = self.processed / 'sorted_stream_0' / 'params.py'
-        if not paramspy.exists():
-            raise PixelsError(f"{self.name}: params.py not found")
-        model = load_model(paramspy)
-        rec_forms = {}
+            paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+            if not paramspy.exists():
+                raise PixelsError(f"{self.name}: params.py not found")
+            model = load_model(paramspy)
+            rec_forms = {}
 
-        for u, unit in enumerate(units):
-            print(100 * u / len(units), "% complete")
-            # get the waveforms from only the best channel
-            spike_ids = model.get_cluster_spikes(unit)
-            best_chan = model.get_cluster_channels(unit)[0]
-            u_waveforms = model.get_waveforms(spike_ids, [best_chan])
-            if u_waveforms is None:
-                raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
-            rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+            for u, unit in enumerate(units):
+                print(100 * u / len(units), "% complete")
+                # get the waveforms from only the best channel
+                spike_ids = model.get_cluster_spikes(unit)
+                best_chan = model.get_cluster_channels(unit)[0]
+                u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+                if u_waveforms is None:
+                    raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
+                rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
 
-        assert rec_forms
+            assert rec_forms
 
-        df = pd.concat(
-            rec_forms,
-            axis=1,
-            names=['unit', 'spike']
-        )
-        # convert indexes to ms
-        rate = 1000 / int(self.spike_meta[0]['imSampRate'])
-        df.index = df.index * rate
-        return df
+            df = pd.concat(
+                rec_forms,
+                axis=1,
+                names=['unit', 'spike']
+            )
+            # convert indexes to ms
+            rate = 1000 / int(self.spike_meta[0]['imSampRate'])
+            df.index = df.index * rate
+            return df
+
+        #TODO: implement spikeinterface waveform extraction
+        elif method == 'spikeinterface':
+            streams = {}
+            # set chunks
+            job_kwargs = dict(
+                n_jobs=10, # -1: num of job equals num of cores
+                chunk_duration="1s",
+                progress_bar=True,
+            )
+
+            # load recording and sorting object
+            for _, files in enumerate(self.files):
+                if len(self.catGT_dir) == 0:
+                    print(f"> Spike data not found for {files['catGT_ap_data']},\
+                        \nuse the orignial recording data.")
+                    data_file = self.find_file(files['spike_data'])
+                    metadata = self.find_file(files['spike_meta'])
+                else:
+                    print("> Use catgt-ed recording")
+                    self.catGT_dir = Path(self.catGT_dir[0])
+                    data_file = self.catGT_dir / files['catGT_ap_data']
+                    metadata = self.catGT_dir / files['catGT_ap_meta']
+
+            stream_id = data_file.as_posix()[-12:-4]
+            if stream_id not in streams:
+                streams[stream_id] = metadata
+
+            for stream_num, stream in enumerate(streams.items()):
+                stream_id, metadata = stream
+                try:
+                    recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
+                    # this recording is filtered
+                    recording.annotate(is_filtered=True)
+                except ValueError as e:
+                    raise PixelsError(
+                        f"Did the raw data get fully copied to interim? Full error: {e}"
+                    )
+                try:
+                    # load sorting object
+                    sorting = si.load_extractor(self.processed)
+                except ValueError as e:
+                    raise PixelsError(
+                        f"Have you run spike sorting yet? Full error: {e}"
+                    )
+
+                try:
+                    waveforms = si.WaveformExtractor.load_from_folder(
+                        folder=self.interim / 'cache',
+                        sorting=sorting,
+                    )
+                except:
+                    print("> Waveforms not extracted, extracting now.")
+
+                #TODO
+                if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
+                    output = self.processed / f'sorted_stream_cat_{stream_num}'
+                else:
+                    output = self.processed / f'sorted_stream_{stream_num}'
+
+                # for testing: get first 5 mins of the recording 
+                fs = concat_rec.get_sampling_frequency()
+                test = concat_rec.frame_slice(
+                    start_frame=0*fs,
+                    end_frame=300*fs,
+                )
+                test.annotate(is_filtered=True)
+                # check all annotations
+                test.get_annotation('is_filtered')
+                print(test)
+
+                # extract waveforms
+                waveforms = si.extract_waveforms(
+                    #recording=concat_rec,
+                    recording=test, # for testing
+                    sorting=ks3_no_empt, # sorting=ks3_output after remove dups 
+                    folder=self.interim / 'cache',
+                    #load_if_exists=True, # load extracted if available
+                    load_if_exists=False, # re-calculate everytime
+                    max_spikes_per_unit=None, # extract all waveforms
+                    overwrite=False,
+                    **job_kwargs,
+                )
+                assert 0
+
+        else:
+            raise PixelsError(f"{self.name}: waveform extraction method {method} is\
+                              not implemented!")
 
     @_cacheable
     def get_aligned_spike_rate_CI(
