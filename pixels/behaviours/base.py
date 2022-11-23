@@ -30,6 +30,7 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.curation as sc
 import spikeinterface.exporters as sexp
+import spikeinterface.postprocessing as spost
 from scipy import interpolate
 from tables import HDF5ExtError
 
@@ -488,7 +489,7 @@ class Behaviour(ABC):
         Run kilosort spike sorting on raw spike data.
         """
         streams = {}
-        # set chunks
+        # set chunks for spikeinterface operations
         job_kwargs = dict(
             n_jobs=10, # -1: num of job equals num of cores
             chunk_duration="1s",
@@ -501,11 +502,11 @@ class Behaviour(ABC):
         for _, files in enumerate(self.files):
             if len(self.catGT_dir) == 0:
                 print(f"> Spike data not found for {files['catGT_ap_data']},\
-                    \nuse the orignial spike data.")
+                    \nuse the orignial spike data.\n")
                 data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
             else:
-                print("> Sorting catgt-ed spikes")
+                print("> Sorting catgt-ed spikes\n")
                 self.catGT_dir = Path(self.catGT_dir[0])
                 data_file = self.catGT_dir / files['catGT_ap_data']
                 metadata = self.catGT_dir / files['catGT_ap_meta']
@@ -516,35 +517,44 @@ class Behaviour(ABC):
 
         for stream_num, stream in enumerate(streams.items()):
             stream_id, metadata = stream
-            try:
-                recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
-                # this recording is filtered
-                recording.annotate(is_filtered=True)
-            except ValueError as e:
-                raise PixelsError(
-                    f"Did the raw data get fully copied to interim? Full error: {e}"
-                )
-
             # find spike sorting output folder
             if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
                 output = self.processed / f'sorted_stream_cat_{stream_num}'
             else:
                 output = self.processed / f'sorted_stream_{stream_num}'
 
-            #TODO
+            # check if already sorted and exported
+            for_phy = output / "phy_ks3"
+            if not os.path.exists(for_phy) or len(os.listdir(for_phy)) == 0:
+                print("> Not sorted yet, start spike sorting...\n")
+            else:
+                print("> Already sorted and exported, next session...\n")
+                continue
+
+            try:
+                recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
+                # this recording is filtered
+                recording.annotate(is_filtered=True)
+            except ValueError as e:
+                raise PixelsError(
+                    f"Did the raw data get fully copied to interim? Full error: {e}\n"
+                )
+
             try: 
-                ks3_output = si.load_extractor(output)
-                print("> This session is already sorted, now it is loaded.") 
-                assert 0
+                ks3_output = si.load_extractor(output /
+                                               f'saved_si_sorting_obj_{stream_num}')
+                print("> This session is already sorted, now it is loaded.\n") 
             except:
-                print("> Running kilosort")
+                print("> Running kilosort\n")
                 # concatenate recording segments
                 concat_rec = si.concatenate_recordings([recording])
                 probe = pi.read_spikeglx(metadata.as_posix())
                 concat_rec = concat_rec.set_probe(probe)
                 # annotate spike data is filtered
                 concat_rec.annotate(is_filtered=True)
+                print(f"> Now is sorting: \n{concat_rec}\n")
 
+                """
                 # for testing: get first 5 mins of the recording 
                 fs = concat_rec.get_sampling_frequency()
                 test = concat_rec.frame_slice(
@@ -555,12 +565,12 @@ class Behaviour(ABC):
                 # check all annotations
                 test.get_annotation('is_filtered')
                 print(test)
+                """
 
                 #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
                 ks3_output = ss.run_sorter(
                     sorter_name='kilosort3',
-                    #recording=concat_rec,
-                    recording=test, # for testing
+                    recording=concat_rec, #recording=test, # for testing
                     output_folder=output,
                     #remove_existing_folder=False,
                     **job_kwargs,
@@ -568,7 +578,7 @@ class Behaviour(ABC):
 
                 # remove empty units
                 ks3_output = ks3_output.remove_empty_units()
-                print(f'KS3 found {len(ks3_no_empt.get_unit_ids())} non-empty units.')
+                print(f"KS3 found {len(ks3_output.get_unit_ids())} non-empty units.\n")
 
                 """
                 #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
@@ -586,45 +596,46 @@ class Behaviour(ABC):
                     folder=self.interim / 'cache',
                     sorting=ks3_output,
                 )
-                print("> Waveforms extracted, now it is loaded.")
+                print("> Waveforms extracted, now it is loaded.\n")
             except:
-                print("> Waveforms not extracted, extracting now.")
+                print("> Waveforms not extracted, extracting now.\n")
                 # extract waveforms
                 waveforms = si.extract_waveforms(
-                    #recording=concat_rec,
-                    recording=test, # for testing
+                    recording=concat_rec, #recording=test, # for testing
                     sorting=ks3_output,
                     folder=self.interim / 'cache',
-                    load_if_exists=True, # load extracted if available
-                    #load_if_exists=False, # re-calculate everytime
-                    max_spikes_per_unit=None, # extract all waveforms
-                    overwrite=False,
+                    #load_if_exists=True, # load extracted if available
+                    load_if_exists=False, # re-calculate everytime
+                    max_spikes_per_unit=1000, # None will extract all waveforms
+                    #overwrite=False,
+                    overwrite=True,
                     **job_kwargs,
                 )
-                assert 0
 
             """
             # TODO: remove redundant units by keeping minimum shift, highest_amplitude, or
             # max_spikes
             ks3_output = sc.remove_redundant_units(
-                ks3_no_empt,
-                WaveformExtractor, # spike trains realigned using the peak shift in template
+                waveforms, # spike trains realigned using the peak shift in template
                 duplicate_threshold=0.9, # default is 0.8
                 remove_strategy='minimum_shift', # keep unit with best peak alignment
             )
             """
-
-            # TODO
+            # export to phy, with pc feature calculated.
+            # copy recording.dat to output so that individual waveforms can be
+            # seen in waveformview.
             sexp.export_to_phy(
                 waveform_extractor=waveforms,
-                output_folder=output / "phy_ks3",
-                compute_pc_features=True,
+                output_folder=for_phy,
+                compute_pc_features=True, # pca
                 compute_amplitudes=True,
                 copy_binary=True,
-                remove_if_exists=True, # load if already exported to phy
+                #remove_if_exists=True, # overwrite everytime
+                remove_if_exists=False, # load if already exists
                 **job_kwargs,
             )
-            assert 0
+            print(f"> Parameters for manual curation saved to {for_phy}.\
+            \n DO NOT FORGET TO COPY cluster_KSLabel.tsv from {output} to {for_phy}.\n")
 
 
     def extract_videos(self, force=False):
