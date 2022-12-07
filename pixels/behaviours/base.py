@@ -396,6 +396,7 @@ class Behaviour(ABC):
                 continue
 
             data_file = self.find_file(recording['spike_data'])
+            """
             orig_rate = self.spike_meta[rec_num]['imSampRate']
             num_chans = self.spike_meta[rec_num]['nSavedChans']
 
@@ -423,6 +424,7 @@ class Behaviour(ABC):
                 data = data[- lag_start:]
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
+            """
 
     def process_lfp(self):
         """
@@ -484,7 +486,7 @@ class Behaviour(ABC):
             #ioutils.write_hdf5(output, downsampled)
 
     
-    def sort_spikes(self):
+    def sort_spikes(self, old=False):
         """
         Run kilosort spike sorting on raw spike data.
         """
@@ -525,7 +527,7 @@ class Behaviour(ABC):
 
             # check if already sorted and exported
             for_phy = output / "phy_ks3"
-            if not os.path.exists(for_phy) or len(os.listdir(for_phy)) == 0:
+            if not os.path.exists(for_phy) or len(os.listdir(for_phy)) == 1:
                 print("> Not sorted yet, start spike sorting...\n")
             else:
                 print("> Already sorted and exported, next session...\n")
@@ -540,56 +542,67 @@ class Behaviour(ABC):
                     f"Did the raw data get fully copied to interim? Full error: {e}\n"
                 )
 
-            try: 
-                ks3_output = si.load_extractor(output /
-                                               f'saved_si_sorting_obj_{stream_num}')
-                print("> This session is already sorted, now it is loaded.\n") 
-            except:
-                print("> Running kilosort\n")
-                # concatenate recording segments
-                concat_rec = si.concatenate_recordings([recording])
-                probe = pi.read_spikeglx(metadata.as_posix())
-                concat_rec = concat_rec.set_probe(probe)
-                # annotate spike data is filtered
-                concat_rec.annotate(is_filtered=True)
-                print(f"> Now is sorting: \n{concat_rec}\n")
-
-                """
-                # for testing: get first 5 mins of the recording 
-                fs = concat_rec.get_sampling_frequency()
-                test = concat_rec.frame_slice(
-                    start_frame=0*fs,
-                    end_frame=300*fs,
-                )
-                test.annotate(is_filtered=True)
-                # check all annotations
-                test.get_annotation('is_filtered')
-                print(test)
-                """
-
-                #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
-                ks3_output = ss.run_sorter(
-                    sorter_name='kilosort3',
-                    recording=concat_rec, #recording=test, # for testing
-                    output_folder=output,
-                    #remove_existing_folder=False,
-                    **job_kwargs,
-                )
-
+            if old:
+                print("\n> loading old kilosort 3 results to spikeinterface")
+                sorting = se.read_kilosort(old_ks_output_dir) # avoid re-sort old
                 # remove empty units
-                ks3_output = ks3_output.remove_empty_units()
-                print(f"KS3 found {len(ks3_output.get_unit_ids())} non-empty units.\n")
+                ks3_output = sorting.remove_empty_units()
+                print(f"> KS3 removed\
+                        {len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                              non-empty units.\n")
+            else:
+                try: 
+                    ks3_output = si.load_extractor(output /
+                                                   f'saved_si_sorting_obj_{stream_num}')
+                    print("> This session is already sorted, now it is loaded.\n") 
+                except:
+                    print("> Running kilosort\n")
+                    # concatenate recording segments
+                    concat_rec = si.concatenate_recordings([recording])
+                    probe = pi.read_spikeglx(metadata.as_posix())
+                    concat_rec = concat_rec.set_probe(probe)
+                    # annotate spike data is filtered
+                    concat_rec.annotate(is_filtered=True)
+                    print(f"> Now is sorting: \n{concat_rec}\n")
 
-                """
-                #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
-                ks3_output = sc.remove_duplicated_spikes(
-                    sorting=ks3_no_empt,
-                    censored_period_ms=0.3, #ms
-                    method='keep_first', # keep first spike, remove the second
-                )
-                """
-                # save spikeinterface sorting object for easier loading
-                ks3_output.save(folder=output / 'saved_si_sorting_obj')
+                    """
+                    # for testing: get first 5 mins of the recording 
+                    fs = concat_rec.get_sampling_frequency()
+                    test = concat_rec.frame_slice(
+                        start_frame=0*fs,
+                        end_frame=300*fs,
+                    )
+                    test.annotate(is_filtered=True)
+                    # check all annotations
+                    test.get_annotation('is_filtered')
+                    print(test)
+                    """
+
+                    #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+                    sorting = ss.run_sorter(
+                        sorter_name='kilosort3',
+                        recording=concat_rec, #recording=test, # for testing
+                        output_folder=output,
+                        #remove_existing_folder=False,
+                        **job_kwargs,
+                    )
+
+                    # remove empty units
+                    ks3_output = sorting.remove_empty_units()
+                    print(f"> KS3 removed\
+                            {len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                                  non-empty units.\n")
+
+                    """
+                    #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
+                    ks3_output = sc.remove_duplicated_spikes(
+                        sorting=ks3_no_empt,
+                        censored_period_ms=0.3, #ms
+                        method='keep_first', # keep first spike, remove the second
+                    )
+                    """
+                    # save spikeinterface sorting object for easier loading
+                    ks3_output.save(folder=output / 'saved_si_sorting_obj')
 
             try:
                 waveforms = si.WaveformExtractor.load_from_folder(
@@ -634,8 +647,33 @@ class Behaviour(ABC):
                 remove_if_exists=False, # load if already exists
                 **job_kwargs,
             )
-            print(f"> Parameters for manual curation saved to {for_phy}.\
-            \n DO NOT FORGET TO COPY cluster_KSLabel.tsv from {output} to {for_phy}.\n")
+            print(f"> Parameters for manual curation saved to {for_phy}.\n")
+
+            correct_kslabels = for_phy / "cluster_KSLabel.tsv",
+            if os.path.exists(correct_kslabels):
+                print(f"\nCorrect KS labels already saved in {correct_kslabels}. Next session.\n")
+                continue
+
+            print("\n> Getting all KS labels...")
+            all_ks_labels = pd.read_csv(
+                output / "cluster_KSLabel.tsv",
+                sep='\t',
+            )
+            print("\n> Finding cluster ids from spikeinterface output...")
+            new_clus_ids = pd.read_csv(
+                for_phy / "cluster_si_unit_ids.tsv",
+                sep='\t',
+            )
+            units = new_clus_ids.si_unit_id.to_list()
+
+            print("\n> Saving correct ks labels...")
+            selected_kslabels = all_ks_labels.iloc[units].reset_index(drop=True)
+            selected_kslabels.loc[:, "cluster_id"] = [i for i in range(new_clus_ids.shape[0])]
+            selected_kslabels.to_csv(
+                correct_kslabels,
+                sep='\t',
+                index=False,
+            )
 
 
     def extract_videos(self, force=False):
@@ -1747,7 +1785,17 @@ class Behaviour(ABC):
 
     def get_cluster_info(self):
         if self._cluster_info is None:
-            info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
+            if len(self.catGT_dir) == 0:
+                print(f"> cluster info not found for {files['catGT_ap_data']},\
+                    \nfind cluster info in old place.\n")
+                info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
+            else:
+                if not (self.processed / 'sorted_stream_cat_0' / 'phy_ks3').exists():
+                    print("> getting cluster info from original kilosort output folder\n")
+                    info_file = self.processed / 'sorted_stream_cat_0' / 'cluster_info.tsv'
+                else:
+                    print("> getting cluster info from spikeinterface export folder\n")
+                    info_file = self.processed / 'sorted_stream_cat_0' / 'phy_ks3' / 'cluster_info.tsv'
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
