@@ -165,7 +165,7 @@ class Behaviour(ABC):
             ioutils.read_meta(self.find_file(f['spike_meta'])) for f in self.files
         ]
         self.lfp_meta = [
-            ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
+            ioutils.read_meta(self.find_file(f['lfp_meta'], copy=False)) for f in self.files
         ]
 
         # environmental variable PIXELS_CACHE={0,1} can be {disable,enable} cache
@@ -503,12 +503,12 @@ class Behaviour(ABC):
         # find spike data to sort
         for _, files in enumerate(self.files):
             if len(self.catGT_dir) == 0:
-                print(f"> Spike data not found for {files['catGT_ap_data']},\
+                print(f"\n> Spike data not found for {files['catGT_ap_data']},\
                     \nuse the orignial spike data.\n")
                 data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
             else:
-                print("> Sorting catgt-ed spikes\n")
+                print("\n> Sorting catgt-ed spikes\n")
                 self.catGT_dir = Path(self.catGT_dir[0])
                 data_file = self.catGT_dir / files['catGT_ap_data']
                 metadata = self.catGT_dir / files['catGT_ap_meta']
@@ -527,8 +527,8 @@ class Behaviour(ABC):
 
             # check if already sorted and exported
             for_phy = output / "phy_ks3"
-            if not os.path.exists(for_phy) or len(os.listdir(for_phy)) == 1:
-                print("> Not sorted yet, start spike sorting...\n")
+            if not for_phy.exists() or not len(os.listdir(for_phy)) > 1:
+                print("> Not sorted or exported yet, start from spike sorting...\n")
             else:
                 print("> Already sorted and exported, next session...\n")
                 continue
@@ -548,8 +548,8 @@ class Behaviour(ABC):
                 # remove empty units
                 ks3_output = sorting.remove_empty_units()
                 print(f"> KS3 removed\
-                        {len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
-                              non-empty units.\n")
+                        \n{len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                        empty units.\n")
             else:
                 try: 
                     ks3_output = si.load_extractor(output /
@@ -590,8 +590,8 @@ class Behaviour(ABC):
                     # remove empty units
                     ks3_output = sorting.remove_empty_units()
                     print(f"> KS3 removed\
-                            {len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
-                                  non-empty units.\n")
+                            \n{len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                            empty units.\n")
 
                     """
                     #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
@@ -604,6 +604,8 @@ class Behaviour(ABC):
                     # save spikeinterface sorting object for easier loading
                     ks3_output.save(folder=output / 'saved_si_sorting_obj')
 
+            #TODO: toggle load_if_exists=True & overwrite=False should replace
+            #...load_from_folder.
             try:
                 waveforms = si.WaveformExtractor.load_from_folder(
                     folder=self.interim / 'cache',
@@ -637,6 +639,7 @@ class Behaviour(ABC):
             # export to phy, with pc feature calculated.
             # copy recording.dat to output so that individual waveforms can be
             # seen in waveformview.
+            print("> Exporting parameters for phy...\n")
             sexp.export_to_phy(
                 waveform_extractor=waveforms,
                 output_folder=for_phy,
@@ -649,8 +652,8 @@ class Behaviour(ABC):
             )
             print(f"> Parameters for manual curation saved to {for_phy}.\n")
 
-            correct_kslabels = for_phy / "cluster_KSLabel.tsv",
-            if os.path.exists(correct_kslabels):
+            correct_kslabels = for_phy / "cluster_KSLabel.tsv"
+            if correct_kslabels.exists():
                 print(f"\nCorrect KS labels already saved in {correct_kslabels}. Next session.\n")
                 continue
 
