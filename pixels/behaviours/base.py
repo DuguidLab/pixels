@@ -486,7 +486,61 @@ class Behaviour(ABC):
             #ioutils.write_hdf5(output, downsampled)
 
     
-    def sort_spikes(self, old=False):
+    def run_catgt(self, CatGT_app=None, args=None) -> None:
+        """
+        This func performs CatGT on copied AP data in the interim.
+
+        params
+        ====
+        data_dir: path, dir to interim data and catgt output.
+
+        catgt_app: path, dir to catgt software.
+
+        args: str, arguments in catgt.
+            default is None.
+        """
+        if CatGT_app == None:
+            CatGT_app = "~/CatGT3.4"
+        # move cwd to catgt
+        os.chdir(CatGT_app)
+
+        assert 0
+        for rec_num, recording in enumerate(self.files):
+            self.find_file(recording['spike_data'])
+
+            # reset catgt args for current session
+            session_args = None
+
+            if len(self.catGT_dir) != 0:
+                if len(os.listdir(self.catGT_dir[0])) != 0:
+                    print(f"\nCatGT already performed on ap data of {self.name}. Next session.\n")
+                    continue
+
+            #TODO: finish this here so that catgt can run together with sorting
+            print(f"> running CatGT on ap data of {self.name}")
+            #_dir = self.interim
+
+            if args == None:
+                args = f"-no_run_fld\
+                    -g=0,9\
+                    -t=0,9\
+                    -prb=0\
+                    -ap\
+                    -lf\
+                    -apfilter=butter,12,300,9000\
+                    -lffilter=butter,12,0.5,300\
+                    -gblcar\
+                    -gfix=0.2,0.1,0.02"
+
+            session_args = f"-dir={self.interim} -run={self.name} -dest={self.interim} " + args
+            print(f"\ncatgt args of {self.name}: \n{session_args}")
+
+            subprocess.run( ['./run_catgt.sh', session_args])
+
+        assert 0
+
+
+    def sort_spikes(self, CatGT_app=None, old=False):
         """
         Run kilosort spike sorting on raw spike data.
         """
@@ -499,6 +553,8 @@ class Behaviour(ABC):
         )
 
         #TODO: consider to put catgt here
+        #if not CatGT_app == None:
+        #    self.run_catgt(CatGT_app=CatGT_app)
 
         # find spike data to sort
         for _, files in enumerate(self.files):
@@ -542,6 +598,13 @@ class Behaviour(ABC):
                     f"Did the raw data get fully copied to interim? Full error: {e}\n"
                 )
 
+            # concatenate recording segments
+            concat_rec = si.concatenate_recordings([recording])
+            probe = pi.read_spikeglx(metadata.as_posix())
+            concat_rec = concat_rec.set_probe(probe)
+            # annotate spike data is filtered
+            concat_rec.annotate(is_filtered=True)
+
             if old:
                 print("\n> loading old kilosort 3 results to spikeinterface")
                 sorting = se.read_kilosort(old_ks_output_dir) # avoid re-sort old
@@ -552,18 +615,8 @@ class Behaviour(ABC):
                         empty units.\n")
             else:
                 try: 
-                    ks3_output = si.load_extractor(output /
-                                                   f'saved_si_sorting_obj_{stream_num}')
+                    ks3_output = si.load_extractor(output / 'saved_si_sorting_obj')
                     print("> This session is already sorted, now it is loaded.\n") 
-                except:
-                    print("> Running kilosort\n")
-                    # concatenate recording segments
-                    concat_rec = si.concatenate_recordings([recording])
-                    probe = pi.read_spikeglx(metadata.as_posix())
-                    concat_rec = concat_rec.set_probe(probe)
-                    # annotate spike data is filtered
-                    concat_rec.annotate(is_filtered=True)
-                    print(f"> Now is sorting: \n{concat_rec}\n")
 
                     """
                     # for testing: get first 5 mins of the recording 
@@ -578,6 +631,9 @@ class Behaviour(ABC):
                     print(test)
                     """
 
+                except:
+                    print("> Running kilosort\n")
+                    print(f"> Now is sorting: \n{concat_rec}\n")
                     #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
                     sorting = ss.run_sorter(
                         sorter_name='kilosort3',
@@ -639,7 +695,7 @@ class Behaviour(ABC):
             # export to phy, with pc feature calculated.
             # copy recording.dat to output so that individual waveforms can be
             # seen in waveformview.
-            print("> Exporting parameters for phy...\n")
+            print("\n> Exporting parameters for phy...\n")
             sexp.export_to_phy(
                 waveform_extractor=waveforms,
                 output_folder=for_phy,
@@ -1788,17 +1844,17 @@ class Behaviour(ABC):
 
     def get_cluster_info(self):
         if self._cluster_info is None:
-            if len(self.catGT_dir) == 0:
-                print(f"> cluster info not found for {files['catGT_ap_data']},\
-                    \nfind cluster info in old place.\n")
-                info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
-            else:
-                if not (self.processed / 'sorted_stream_cat_0' / 'phy_ks3').exists():
-                    print("> getting cluster info from original kilosort output folder\n")
-                    info_file = self.processed / 'sorted_stream_cat_0' / 'cluster_info.tsv'
+            if not (self.processed / 'sorted_stream_cat_0' / 'phy_ks3' /
+                'cluster_info.tsv').exists(): 
+                if not (self.processed / 'sorted_stream_cat_0' /
+                    'cluster_info.tsv').exists(): 
+                    info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
                 else:
-                    print("> getting cluster info from spikeinterface export folder\n")
-                    info_file = self.processed / 'sorted_stream_cat_0' / 'phy_ks3' / 'cluster_info.tsv'
+                    info_file = self.processed / 'sorted_stream_cat_0' / 'cluster_info.tsv'
+            else:
+                info_file = self.processed / 'sorted_stream_cat_0' / 'phy_ks3' / 'cluster_info.tsv'
+
+            print(f"> got cluster info at {info_file}\n")
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
