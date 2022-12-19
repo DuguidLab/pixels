@@ -14,6 +14,7 @@ import shutil
 import tarfile
 import tempfile
 import re
+import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
@@ -144,7 +145,7 @@ class Behaviour(ABC):
         else:
             self.interim = Path(interim_dir) / self.name
 
-        self.catGT_dir = glob.glob(
+        self.CatGT_dir = glob.glob(
             str(self.interim) +'/' + f'catgt_{self.name}_g[0-9]'
         )
 
@@ -504,20 +505,20 @@ class Behaviour(ABC):
         # move cwd to catgt
         os.chdir(CatGT_app)
 
-        assert 0
         for rec_num, recording in enumerate(self.files):
+            # copy spike data to interim
             self.find_file(recording['spike_data'])
 
             # reset catgt args for current session
             session_args = None
 
-            if len(self.catGT_dir) != 0:
-                if len(os.listdir(self.catGT_dir[0])) != 0:
+            if len(self.CatGT_dir) != 0:
+                if len(os.listdir(self.CatGT_dir[0])) != 0:
                     print(f"\nCatGT already performed on ap data of {self.name}. Next session.\n")
                     continue
 
             #TODO: finish this here so that catgt can run together with sorting
-            print(f"> running CatGT on ap data of {self.name}")
+            print(f"> Running CatGT on ap data of {self.name}")
             #_dir = self.interim
 
             if args == None:
@@ -529,6 +530,7 @@ class Behaviour(ABC):
                     -lf\
                     -apfilter=butter,12,300,9000\
                     -lffilter=butter,12,0.5,300\
+                    -xd=2,0,384,6,500\
                     -gblcar\
                     -gfix=0.2,0.1,0.02"
 
@@ -536,8 +538,6 @@ class Behaviour(ABC):
             print(f"\ncatgt args of {self.name}: \n{session_args}")
 
             subprocess.run( ['./run_catgt.sh', session_args])
-
-        assert 0
 
 
     def sort_spikes(self, CatGT_app=None, old=False):
@@ -552,22 +552,18 @@ class Behaviour(ABC):
             progress_bar=True,
         )
 
-        #TODO: consider to put catgt here
-        #if not CatGT_app == None:
-        #    self.run_catgt(CatGT_app=CatGT_app)
-
-        # find spike data to sort
         for _, files in enumerate(self.files):
-            if len(self.catGT_dir) == 0:
-                print(f"\n> Spike data not found for {files['catGT_ap_data']},\
-                    \nuse the orignial spike data.\n")
+            if not CatGT_app == None:
+                self.run_catgt(CatGT_app=CatGT_app)
+
+                print("\n> Sorting catgt-ed spikes\n")
+                self.CatGT_dir = Path(self.CatGT_dir[0])
+                data_file = self.CatGT_dir / files['catGT_ap_data']
+                metadata = self.CatGT_dir / files['catGT_ap_meta']
+            else:
+                print(f"\n> using the orignial spike data.\n")
                 data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
-            else:
-                print("\n> Sorting catgt-ed spikes\n")
-                self.catGT_dir = Path(self.catGT_dir[0])
-                data_file = self.catGT_dir / files['catGT_ap_data']
-                metadata = self.catGT_dir / files['catGT_ap_meta']
 
         stream_id = data_file.as_posix()[-12:-4]
         if stream_id not in streams:
@@ -590,7 +586,7 @@ class Behaviour(ABC):
                 continue
 
             try:
-                recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
+                recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
                 # this recording is filtered
                 recording.annotate(is_filtered=True)
             except ValueError as e:
@@ -1948,16 +1944,16 @@ class Behaviour(ABC):
 
             # load recording and sorting object
             for _, files in enumerate(self.files):
-                if len(self.catGT_dir) == 0:
+                if len(self.CatGT_dir) == 0:
                     print(f"> Spike data not found for {files['catGT_ap_data']},\
                         \nuse the orignial recording data.")
                     data_file = self.find_file(files['spike_data'])
                     metadata = self.find_file(files['spike_meta'])
                 else:
                     print("> Use catgt-ed recording")
-                    self.catGT_dir = Path(self.catGT_dir[0])
-                    data_file = self.catGT_dir / files['catGT_ap_data']
-                    metadata = self.catGT_dir / files['catGT_ap_meta']
+                    self.CatGT_dir = Path(self.CatGT_dir[0])
+                    data_file = self.CatGT_dir / files['catGT_ap_data']
+                    metadata = self.CatGT_dir / files['catGT_ap_meta']
 
             stream_id = data_file.as_posix()[-12:-4]
             if stream_id not in streams:
@@ -1966,7 +1962,7 @@ class Behaviour(ABC):
             for stream_num, stream in enumerate(streams.items()):
                 stream_id, metadata = stream
                 try:
-                    recording = se.SpikeGLXRecordingExtractor(self.catGT_dir, stream_id=stream_id)
+                    recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
                     # this recording is filtered
                     recording.annotate(is_filtered=True)
                 except ValueError as e:
