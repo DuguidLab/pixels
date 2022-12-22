@@ -138,6 +138,24 @@ class Behaviour(ABC):
 
         self.raw = self.data_dir / 'raw' / self.name
         self.processed = self.data_dir / 'processed' / self.name
+
+        ks_output = glob.glob(
+            str(self.processed) +'/' + f'sorted_stream_cat_[0-9]'
+        )
+        if not len(ks_output) == 0:
+            ks_output = Path(ks_output[0])
+            if not ((ks_output / 'phy_ks3').exists() and
+                    len(os.listdir(ks_output / 'phy_ks3'))>17): 
+                #if not (ks_output.exists() and
+                        #len(os.listdir(ks_output / ks_output))>17): 
+                self.ks_output = ks_output
+            else:
+                self.ks_output = ks_output / 'phy_ks3'
+        else:
+            self.ks_output = Path(glob.glob(
+                str(self.processed) +'/' + f'sorted_stream_[0-9]'
+            )[0])
+
         self.files = ioutils.get_data_files(self.raw, name)
 
         if interim_dir is None:
@@ -163,7 +181,7 @@ class Behaviour(ABC):
         self.drop_data()
 
         self.spike_meta = [
-            ioutils.read_meta(self.find_file(f['spike_meta'])) for f in self.files
+            ioutils.read_meta(self.find_file(f['spike_meta'], copy=False)) for f in self.files
         ]
         self.lfp_meta = [
             ioutils.read_meta(self.find_file(f['lfp_meta'], copy=False)) for f in self.files
@@ -214,10 +232,18 @@ class Behaviour(ABC):
         """
         depth_file = self.processed / 'depth.txt'
         if not depth_file.exists():
-            msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
+            depth_file = self.processed / self.files[0]["depth_info"]
+
+        if not depth_file.exists():
+            msg = f": Can't load probe depth: please add it in um to\
+            \nprocessed/{self.name}/depth.txt, or save it with other depth related\
+            \ninfo in {self.processed / self.files[0]['depth_info']}."
             raise PixelsError(msg)
-        with depth_file.open() as fd:
-            return [float(line) for line in fd.readlines()]
+        if Path(depth_file).suffix == ".txt":
+            with depth_file.open() as fd:
+                return [float(line) for line in fd.readlines()]
+        elif Path(depth_file).suffix == ".json":
+            return [json.load(open(depth_file, mode="r"))["clustering"]]
 
     def find_file(self, name: str, copy: bool=True) -> Optional[Path]:
         """
@@ -1840,17 +1866,9 @@ class Behaviour(ABC):
 
     def get_cluster_info(self):
         if self._cluster_info is None:
-            if not (self.processed / 'sorted_stream_cat_0' / 'phy_ks3' /
-                'cluster_info.tsv').exists(): 
-                if not (self.processed / 'sorted_stream_cat_0' /
-                    'cluster_info.tsv').exists(): 
-                    info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
-                else:
-                    info_file = self.processed / 'sorted_stream_cat_0' / 'cluster_info.tsv'
-            else:
-                info_file = self.processed / 'sorted_stream_cat_0' / 'phy_ks3' / 'cluster_info.tsv'
-
+            info_file = self.ks_output / 'cluster_info.tsv'
             print(f"> got cluster info at {info_file}\n")
+
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
@@ -1904,7 +1922,8 @@ class Behaviour(ABC):
 
             units = self.select_units()
 
-            paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+            #paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+            paramspy = self.ks_output / 'params.py'
             if not paramspy.exists():
                 raise PixelsError(f"{self.name}: params.py not found")
             model = load_model(paramspy)
