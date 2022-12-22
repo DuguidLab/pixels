@@ -17,76 +17,95 @@ from pixels import signal, ioutils
 from pixels.behaviours import Behaviour
 
 
-class ActionLabels:
+class VisStimLabels:
     """
-    These actions cover all possible trial types.
-    'g0.04' and 'g0.16' correspond to the grating trial's spatial frequency. This
-    means trials with all temporal frequencies are included here.
+    These visual stim labels cover all possible trial types.
+    'sf_004' and 'sf_016' correspond to the grating trial's spatial frequency.
+    This means trials with all temporal frequencies are included here.
+    'left' and 'right' notes the direction where the grating is drifting towards.
+    Gratings have six possible orientations in total, 30 deg aparts.
     'nat_movie' and 'cage_movie' correspond to movie trials, where a 60s of natural
     or animal home cage movie is played.
 
-    for ESCN00-03, start of each of these trials is marked by a rise of 500 ms TTL
+    for ESCN00 to 03, start of each of these trials is marked by a rise of 500 ms TTL
     pulse.
     Within each grating trial, each orientation grating shows for 2s, their
     beginnings and ends are both marked by a rise of 500 ms TTL pulse.
 
-     *dec 16th 2022: in the near future, there will be 'nat_image' trial, where 
+     *dec 16th 2022: in the near future, there will be 'nat_image' trial, where...
 
     To align trials to more than one action type they can be bitwise OR'd i.e.
     `miss_left | miss_right` will match all miss trials.
     """
-    # gratings 0.04 spatial freq
-    g_0.04_0 = 1 << 0
-    g_0.04_30 = 1 << 1
-    g_0.04_60 = 1 << 2
-    g_0.04_90 = 1 << 3
-    g_0.04_120 = 1 << 4
-    g_0.04_150 = 1 << 5
-    g_0.04_180 = 1 << 6
-    g_0.04_210 = 1 << 7
-    g_0.04_240 = 1 << 8
-    g_0.04_270 = 1 << 9
-    g_0.04_300 = 1 << 10
-    g_0.04_330 = 1 << 11
+    # gratings 0.04 & 0.16 spatial frequency
+    sf_004 = 1 << 0
+    sf_016 = 1 << 1
 
-    # gratings 0.16 spatial freq
-    g_0.16_0 = 1 << 12
-    g_0.16_30 = 1 << 13
-    g_0.16_60 = 1 << 14
-    g_0.16_90 = 1 << 15
-    g_0.16_120 = 1 << 16
-    g_0.16_150 = 1 << 17
-    g_0.16_180 = 1 << 18
-    g_0.16_210 = 1 << 19
-    g_0.16_240 = 1 << 20
-    g_0.16_270 = 1 << 21
-    g_0.16_300 = 1 << 22
-    g_0.16_330 = 1 << 23
+    # directions
+    left = 1 << 2
+    right = 1 << 3
 
-    # movies
-    nat_movie = 1 << 24
-    cage_movie = 1 << 25
+    # orientations
+    g_0 = 1 << 4
+    g_30 = 1 << 5
+    g_60 = 1 << 6
+    g_90 = 1 << 7
+    g_120 = 1 << 8
+    g_150 = 1 << 9
 
     # iti marks
-    black = 1 << 26
-    gray = 1 << 27
+    black = 1 << 10
+    gray = 1 << 11
+
+    # movies
+    nat_movie = 1 << 12
+    cage_movie = 1 << 13
+
+    """
+    # spatial freq 0.04 directions 0:30:150
+    g_004_0 = sf_004 & g_0 & left
+    g_004_30 = sf_004 & g_30 & left
+    g_004_60 = sf_004 & g_60 & left
+    g_004_90 = sf_004 & g_90 & left
+    g_004_120 = sf_004 & g_120 & left
+    g_004_150 = sf_004 & g_150 & left
+
+    # spatial freq 0.04 directions 180:30:330
+    g_004_180 = sf_004 & g_0 & right
+    g_004_210 = sf_004 & g_30 & right
+    g_004_240 = sf_004 & g_60 & right
+    g_004_270 = sf_004 & g_90 & right
+    g_004_300 = sf_004 & g_120 & right
+    g_004_330 = sf_004 & g_150 & right
+
+    # spatial freq 0.16 directions 0:30:150
+    g_016_0 = sf_016 & g_0 & left
+    g_016_30 = sf_016 & g_30 & left
+    g_016_60 = sf_016 & g_60 & left
+    g_016_90 = sf_016 & g_90 & left
+    g_016_120 = sf_016 & g_120 & left
+    g_016_150 = sf_016 & g_150 & left
+
+    # spatial freq 0.16 directions 180:30:330
+    g_016_180 = sf_016 & g_0 & right
+    g_016_210 = sf_016 & g_30 & right
+    g_016_240 = sf_016 & g_60 & right
+    g_016_270 = sf_016 & g_90 & right
+    g_016_300 = sf_016 & g_120 & right
+    g_016_330 = sf_016 & g_150 & right
+
+    # spatial freq 0.04
+    g_004 = sf_004 & (g_0 | )& (left | right)
+    g_004 = g_004_0 | g_004_30 | g_004_60 | g_004_90 |
+
+    # spatial freq 0.16
+    """
 
     #TODO: natural images
 
-
 class Events:
-    led_on = 1 << 0
-    led_off = 1 << 1
-
-    # Timepoints determined from motion tracking
-    reach_onset = 1 << 2
-    slit_in = 1 << 3
-    grasp = 1 << 4
-    slit_out = 1 << 5
-    subsequent_slit_in = 1 << 6  # The SECOND full reach on a clean correct trial only
-    subsequent_grasp = 1 << 7
-    subsequent_slit_out = 1 << 8
-
+    start = 1 << 0
+    end = 1 << 1
 
 # These are used to convert the trial data into Actions and Events
 _side_map = {
@@ -102,7 +121,8 @@ _action_map = {
 
 
 
-class Reach(Behaviour):
+class PassiveViewing(Behaviour):
+    #TODO: continue here, see how to map behaviour metadata
     def _preprocess_behaviour(self, rec_num, behavioural_data):
         # Correction for sessions where sync channel interfered with LED channel
         if behavioural_data["/'ReachLEDs'/'0'"].min() < -2:
