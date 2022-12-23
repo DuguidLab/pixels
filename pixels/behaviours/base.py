@@ -699,7 +699,9 @@ class Behaviour(ABC):
                     folder=self.interim / 'cache',
                     #load_if_exists=True, # load extracted if available
                     load_if_exists=False, # re-calculate everytime
-                    max_spikes_per_unit=1000, # None will extract all waveforms
+                    max_spikes_per_unit=500, # None will extract all waveforms
+                    ms_before=2.0, # time before trough 
+                    ms_after=2.0, # time after trough 
                     #overwrite=False,
                     overwrite=True,
                     **job_kwargs,
@@ -1930,7 +1932,7 @@ class Behaviour(ABC):
             rec_forms = {}
 
             for u, unit in enumerate(units):
-                print(100 * u / len(units), "% complete")
+                print(f"{round(100 * u / len(units), 2)}% complete")
                 # get the waveforms from only the best channel
                 spike_ids = model.get_cluster_spikes(unit)
                 best_chan = model.get_cluster_channels(unit)[0]
@@ -2038,6 +2040,101 @@ class Behaviour(ABC):
         else:
             raise PixelsError(f"{self.name}: waveform extraction method {method} is\
                               not implemented!")
+
+
+    @_cacheable
+    def get_waveform_metrics(self, units=None, window=20):
+        """
+        This func is a work-around of spikeinterface's equivalent:
+        https://github.com/SpikeInterface/spikeinterface/blob/master/spikeinterface/postprocessing/template_metrics.py.
+        dec 23rd 2022: motivation to write this function is that spikeinterface
+        0.96.1 cannot load sorting object from `export_to_phy` output folder, i.e., i
+        cannot get updated clusters/units and their waveforms, which is a huge
+        problem for subsequent analyses e.g. unit type clustering.
+
+        To learn more about waveform metrics, see
+        https://github.com/AllenInstitute/ecephys_spike_sorting/tree/master/ecephys_spike_sorting/modules/mean_waveforms
+        and https://journals.physiology.org/doi/full/10.1152/jn.00680.2018.
+
+        """
+        if units:
+            # Always defer to getting waveform metrics for all good units, so we only
+            # ever have to calculate metrics for each once.
+            wave_metrics = self.get_waveform_metrics()
+            return wave_metrics.loc[wave_metrics.unit.isin(units)]
+
+        columns = ["unit", "trough_to_peak", "trough_peak_ratio", "half_width",
+                   "repolarisation_slope", "recovery_slope"]
+        print(f"> Calculating waveform metrics {columns[1:]}...\n")
+
+        waveforms = self.get_spike_waveforms()
+        units = waveforms.columns.get_level_values('unit').unique()
+
+        output = {}
+        for i, unit in enumerate(units):
+            metrics = []
+            mean_waveform = waveforms[unit].mean(axis=1)
+
+            # time between trough to peak, in ms
+            trough_idx = np.argmin(mean_waveform)
+            peak_idx = trough_idx + np.argmax(mean_waveform.iloc[trough_idx:])
+            if peak_idx == 0:
+                raise PixelsError(f"> Cannot find peak in mean waveform.")
+            if trough_idx == 0:
+                raise PixelsError(f"> Cannot find trough in mean waveform.")
+            trough_to_peak = mean_waveform.index[peak_idx] - mean_waveform.index[trough_idx]
+            metrics.append(trough_to_peak)
+
+            # trough to peak ratio
+            trough_peak_ratio = mean_waveform.iloc[peak_idx] / mean_waveform.iloc[trough_idx]
+            metrics.append(trough_peak_ratio)
+
+            # spike half width, in ms
+            half_amp = mean_waveform.iloc[trough_idx] / 2
+            idx_pre_half = np.where(mean_waveform.iloc[:trough_idx] < half_amp)
+            idx_post_half = np.where(mean_waveform.iloc[trough_idx:] < half_amp)
+            # last occurence of mean waveform amp lower than half amp, before trough
+            time_pre_half = mean_waveform.iloc[idx_pre_half[0] - 1].index[0]
+            # first occurence of mean waveform amp lower than half amp, after trough
+            time_post_half = mean_waveform.iloc[idx_post_half[0] + 1 +
+                                                trough_idx].index[-1]
+            half_width = time_post_half - time_pre_half
+            metrics.append(half_width)
+
+            # repolarisation slope
+            returns = np.where(mean_waveform.iloc[trough_idx:] >= 0) + trough_idx
+            if len(returns[0]) == 0:
+                raise PixelsError(f"> The mean waveformrns never returned to baseline?")
+            return_idx = returns[0][0]
+            if return_idx - trough_idx < 3:
+                raise PixelsError(f"> The mean waveform returns to baseline too quickly,\
+                                  \ndoes not make sense...")
+            repo_period = mean_waveform.iloc[trough_idx:return_idx]
+            repo_slope = scipy.stats.linregress(
+                x=repo_period.index.values, # time in ms
+                y=repo_period.values, # amp
+             ).slope
+            metrics.append(repo_slope)
+
+            # recovery slope during user-defined recovery period
+            recovery_end_idx = peak_idx + window
+            recovery_end_idx = np.min([recovery_end_idx, mean_waveform.shape[0]])
+            reco_period = mean_waveform.iloc[peak_idx:recovery_end_idx]
+            reco_slope = scipy.stats.linregress(
+                x=reco_period.index.values, # time in ms
+                y=reco_period.values, # amp
+             ).slope
+            metrics.append(reco_slope)
+
+            # save metrics in output dictionary, key is unit id
+            output[unit] = metrics
+
+        # save all template metrics as dataframe
+        df = pd.DataFrame(output).T.reset_index()
+        df.columns = columns
+
+        return df
+
 
     @_cacheable
     def get_aligned_spike_rate_CI(

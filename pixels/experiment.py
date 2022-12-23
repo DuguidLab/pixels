@@ -299,6 +299,26 @@ class Experiment:
         )
         return df
 
+    def get_waveform_metrics(self, units=None):
+        """
+        Get waveform metrics of mean waveform for units matching the specified criteria.
+        """
+        waveform_metrics = {}
+
+        for i, session in enumerate(self.sessions):
+            if units:
+                if units[i]:
+                    waveform_metrics[i] = session.get_waveform_metrics(units=units[i])
+            else:
+                waveform_metrics[i] = session.get_waveform_metrics()
+
+        df = pd.concat(
+            waveform_metrics.values(), axis=1, copy=False,
+            keys=waveform_metrics.keys(),
+            names=["session"]
+        )
+        return df
+
     def get_aligned_spike_rate_CI(self, *args, units=None, **kwargs):
         """
         Get the confidence intervals of the mean firing rates within a window aligned to
