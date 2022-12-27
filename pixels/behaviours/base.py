@@ -701,7 +701,7 @@ class Behaviour(ABC):
                     load_if_exists=False, # re-calculate everytime
                     max_spikes_per_unit=500, # None will extract all waveforms
                     ms_before=2.0, # time before trough 
-                    ms_after=2.0, # time after trough 
+                    ms_after=3.0, # time after trough 
                     #overwrite=False,
                     overwrite=True,
                     **job_kwargs,
@@ -1558,7 +1558,7 @@ class Behaviour(ABC):
 
                 # and that are within the specified depth range
                 if min_depth is not None:
-                    if probe_depth - unit_info['depth'] < min_depth:
+                    if probe_depth - unit_info['depth'] <= min_depth:
                         continue
                 if max_depth is not None:
                     if probe_depth - unit_info['depth'] > max_depth:
@@ -2079,9 +2079,9 @@ class Behaviour(ABC):
             trough_idx = np.argmin(mean_waveform)
             peak_idx = trough_idx + np.argmax(mean_waveform.iloc[trough_idx:])
             if peak_idx == 0:
-                raise PixelsError(f"> Cannot find peak in mean waveform.")
+                raise PixelsError(f"> Cannot find peak in mean waveform.\n")
             if trough_idx == 0:
-                raise PixelsError(f"> Cannot find trough in mean waveform.")
+                raise PixelsError(f"> Cannot find trough in mean waveform.\n")
             trough_to_peak = mean_waveform.index[peak_idx] - mean_waveform.index[trough_idx]
             metrics.append(trough_to_peak)
 
@@ -2094,7 +2094,11 @@ class Behaviour(ABC):
             idx_pre_half = np.where(mean_waveform.iloc[:trough_idx] < half_amp)
             idx_post_half = np.where(mean_waveform.iloc[trough_idx:] < half_amp)
             # last occurence of mean waveform amp lower than half amp, before trough
-            time_pre_half = mean_waveform.iloc[idx_pre_half[0] - 1].index[0]
+            if len(idx_pre_half[0]) == 0:
+                idx_pre_half = trough_idx - 1
+                time_pre_half = mean_waveform.index[idx_pre_half]
+            else:
+                time_pre_half = mean_waveform.iloc[idx_pre_half[0] - 1].index[0]
             # first occurence of mean waveform amp lower than half amp, after trough
             time_post_half = mean_waveform.iloc[idx_post_half[0] + 1 +
                                                 trough_idx].index[-1]
@@ -2104,11 +2108,13 @@ class Behaviour(ABC):
             # repolarisation slope
             returns = np.where(mean_waveform.iloc[trough_idx:] >= 0) + trough_idx
             if len(returns[0]) == 0:
-                raise PixelsError(f"> The mean waveformrns never returned to baseline?")
-            return_idx = returns[0][0]
-            if return_idx - trough_idx < 3:
-                raise PixelsError(f"> The mean waveform returns to baseline too quickly,\
-                                  \ndoes not make sense...")
+                print(f"> The mean waveformrns never returned to baseline?\n")
+                return_idx = mean_waveform.shape[0] - 1
+            else:
+                return_idx = returns[0][0]
+                if return_idx - trough_idx < 2:
+                    raise PixelsError(f"> The mean waveform returns to baseline too quickly,\
+                                      \ndoes not make sense...\n")
             repo_period = mean_waveform.iloc[trough_idx:return_idx]
             repo_slope = scipy.stats.linregress(
                 x=repo_period.index.values, # time in ms
@@ -2132,6 +2138,8 @@ class Behaviour(ABC):
         # save all template metrics as dataframe
         df = pd.DataFrame(output).T.reset_index()
         df.columns = columns
+        dtype = {"unit": int}
+        df = df.astype(dtype)
 
         return df
 
