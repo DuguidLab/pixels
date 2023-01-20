@@ -178,6 +178,7 @@ class Behaviour(ABC):
         self._lag = None
         self._use_cache = True
         self._cluster_info = None
+        self._good_unit_info = None
         self.drop_data()
 
         self.spike_meta = [
@@ -566,6 +567,59 @@ class Behaviour(ABC):
             subprocess.run( ['./run_catgt.sh', session_args])
 
 
+    def load_recording(self):
+        try:
+            recording = si.load_extractor(self.interim / 'cache/recording.json')
+            concat_rec = recording
+            output = os.path.dirname(self.ks_output)
+            return recording, output
+
+        except:
+            for _, files in enumerate(self.files):
+                try:
+                    print("\n> Getting catgt-ed recording...")
+                    self.CatGT_dir = Path(self.CatGT_dir[0])
+                    data_dir = self.CatGT_dir
+                    data_file = data_dir / files['catGT_ap_data']
+                    metadata = data_dir / files['catGT_ap_meta']
+                except:
+                    print(f"\n> Getting the orignial recording...")
+                    data_file = self.find_file(files['spike_data'])
+                    metadata = self.find_file(files['spike_meta'])
+
+            assert 0
+            stream_id = data_file.as_posix()[-12:-4]
+            if stream_id not in streams:
+                streams[stream_id] = metadata
+
+            for stream_num, stream in enumerate(streams.items()):
+                stream_id, metadata = stream
+                # find spike sorting output folder
+                if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
+                    output = self.processed / f'sorted_stream_cat_{stream_num}'
+                else:
+                    output = self.processed / f'sorted_stream_{stream_num}'
+
+                try:
+                    recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
+                except ValueError as e:
+                    raise PixelsError(
+                        f"Did the raw data get fully copied to interim? Full error: {e}\n"
+                    )
+
+                # this recording is filtered
+                recording.annotate(is_filtered=True)
+
+                # concatenate recording segments
+                concat_rec = si.concatenate_recordings([recording])
+                probe = pi.read_spikeglx(metadata.as_posix())
+                concat_rec = concat_rec.set_probe(probe)
+                # annotate spike data is filtered
+                concat_rec.annotate(is_filtered=True)
+
+        return concat_rec, output
+
+
     def sort_spikes(self, CatGT_app=None, old=False):
         """
         Run kilosort spike sorting on raw spike data.
@@ -578,6 +632,10 @@ class Behaviour(ABC):
             progress_bar=True,
         )
 
+        concat_rec, output = self.load_recording()
+
+        assert 0
+        #TODO: see if ks can run normally now using load_recording()
         for _, files in enumerate(self.files):
             if not CatGT_app == None:
                 self.run_catgt(CatGT_app=CatGT_app)
@@ -1105,6 +1163,7 @@ class Behaviour(ABC):
 
                 # Get MIs
                 avi = self.interim / video.with_suffix('.avi')
+                #TODO: how to load recording
                 rec_rois, roi_file = ses_rois[(rec_num, v)]
                 rec_mi = signal.motion_index(avi, rec_rois)
 
@@ -1879,6 +1938,19 @@ class Behaviour(ABC):
             self._cluster_info = info
         return self._cluster_info
 
+    def get_good_units_info(self):
+        if self._good_unit_info is None:
+            info_file = self.interim / 'good_units_info.tsv'
+            print(f"> got good unit info at {info_file}\n")
+
+            try:
+                info = pd.read_csv(info_file, sep='\t')
+            except FileNotFoundError:
+                msg = ": Can't load cluster info. Did you export good unit info for this session yet?"
+                raise PixelsError(self.name + msg)
+            self._good_unit_info = info
+        return self._good_unit_info
+
     @_cacheable
     def get_spike_widths(self, units=None):
         if units:
@@ -1912,6 +1984,12 @@ class Behaviour(ABC):
 
     @_cacheable
     def get_spike_waveforms(self, units=None, method='phy'):
+        """
+        Extracts waveforms of spikes.
+        method: str, name of selected method.
+            'phy' (default)
+            'spikeinterface'
+        """
         if method == 'phy':
             from phylib.io.model import load_model
             from phylib.utils.color import selected_cluster_color
@@ -1955,87 +2033,64 @@ class Behaviour(ABC):
 
         #TODO: implement spikeinterface waveform extraction
         elif method == 'spikeinterface':
-            streams = {}
             # set chunks
             job_kwargs = dict(
                 n_jobs=10, # -1: num of job equals num of cores
                 chunk_duration="1s",
                 progress_bar=True,
             )
-
-            # load recording and sorting object
-            for _, files in enumerate(self.files):
-                if len(self.CatGT_dir) == 0:
-                    print(f"> Spike data not found for {files['catGT_ap_data']},\
-                        \nuse the orignial recording data.")
-                    data_file = self.find_file(files['spike_data'])
-                    metadata = self.find_file(files['spike_meta'])
-                else:
-                    print("> Use catgt-ed recording")
-                    self.CatGT_dir = Path(self.CatGT_dir[0])
-                    data_file = self.CatGT_dir / files['catGT_ap_data']
-                    metadata = self.CatGT_dir / files['catGT_ap_meta']
-
-            stream_id = data_file.as_posix()[-12:-4]
-            if stream_id not in streams:
-                streams[stream_id] = metadata
-
-            for stream_num, stream in enumerate(streams.items()):
-                stream_id, metadata = stream
-                try:
-                    recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
-                    # this recording is filtered
-                    recording.annotate(is_filtered=True)
-                except ValueError as e:
-                    raise PixelsError(
-                        f"Did the raw data get fully copied to interim? Full error: {e}"
-                    )
-                try:
-                    # load sorting object
-                    sorting = si.load_extractor(self.processed)
-                except ValueError as e:
-                    raise PixelsError(
-                        f"Have you run spike sorting yet? Full error: {e}"
-                    )
-
-                try:
-                    waveforms = si.WaveformExtractor.load_from_folder(
-                        folder=self.interim / 'cache',
-                        sorting=sorting,
-                    )
-                except:
-                    print("> Waveforms not extracted, extracting now.")
-
-                #TODO
-                if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
-                    output = self.processed / f'sorted_stream_cat_{stream_num}'
-                else:
-                    output = self.processed / f'sorted_stream_{stream_num}'
-
-                # for testing: get first 5 mins of the recording 
-                fs = concat_rec.get_sampling_frequency()
-                test = concat_rec.frame_slice(
-                    start_frame=0*fs,
-                    end_frame=300*fs,
+            recording, _ = self.load_recording()
+            try:
+                sorting = se.read_kilosort(self.ks_output)
+            except ValueError as e:
+                raise PixelsError(
+                    f"Can't load sorting object. Did you delete cluster_info.csv? Full error: {e}\n"
                 )
-                test.annotate(is_filtered=True)
-                # check all annotations
-                test.get_annotation('is_filtered')
-                print(test)
 
-                # extract waveforms
-                waveforms = si.extract_waveforms(
-                    #recording=concat_rec,
-                    recording=test, # for testing
-                    sorting=ks3_no_empt, # sorting=ks3_output after remove dups 
-                    folder=self.interim / 'cache',
-                    #load_if_exists=True, # load extracted if available
-                    load_if_exists=False, # re-calculate everytime
-                    max_spikes_per_unit=None, # extract all waveforms
-                    overwrite=False,
-                    **job_kwargs,
-                )
-                assert 0
+            # check last modified time of cache, and create time of ks_output
+            try:
+                template_cache_mod_time = os.path.getmtime(self.interim /
+                                                           'cache/templates_average.npy')
+                ks_mod_time = os.path.getmtime(self.ks_output / 'cluster_info.tsv')
+                assert template_cache_mod_time < ks_mod_time
+                check = True # re-extract waveforms
+                print("> Re-extracting waveforms since kilosort output is newer.") 
+            except:
+                if 'template_cache_mod_time' in locals():
+                    print("> Loading existing waveforms.") 
+                    check = False # load existing waveforms
+                else:
+                    print("> Extracting waveforms since they are not extracted.") 
+                    check = True # re-extract waveforms
+
+            """
+            # for testing: get first 5 mins of the recording 
+            fs = concat_rec.get_sampling_frequency()
+            test = concat_rec.frame_slice(
+                start_frame=0*fs,
+                end_frame=300*fs,
+            )
+            test.annotate(is_filtered=True)
+            # check all annotations
+            test.get_annotation('is_filtered')
+            print(test)
+            """
+
+            # extract waveforms
+            waveforms = si.extract_waveforms(
+                recording=recording,
+                sorting=sorting,
+                folder=self.interim / 'cache',
+                load_if_exists=not(check), # maybe re-extracted
+                max_spikes_per_unit=500, # None will extract all waveforms
+                ms_before=2.0, # time before trough 
+                ms_after=3.0, # time after trough 
+                overwrite=check, # overwrite depends on check
+                **job_kwargs,
+            )
+            #TODO: use cache to export the results?
+
+            return waveforms
 
         else:
             raise PixelsError(f"{self.name}: waveform extraction method {method} is\
@@ -2068,12 +2123,18 @@ class Behaviour(ABC):
         print(f"> Calculating waveform metrics {columns[1:]}...\n")
 
         waveforms = self.get_spike_waveforms()
+        # remove nan values
+        waveforms.dropna()
         units = waveforms.columns.get_level_values('unit').unique()
 
         output = {}
         for i, unit in enumerate(units):
             metrics = []
-            mean_waveform = waveforms[unit].mean(axis=1)
+            mean_waveform = waveforms[unit].median(axis=1)
+            # normalise mean waveform to remove variance caused by distance!
+            mean_waveform = mean_waveform / mean_waveform.abs().max()
+            #TODO: test! also can try clustering on normalised meann waveform
+            assert 0
 
             # time between trough to peak, in ms
             trough_idx = np.argmin(mean_waveform)
