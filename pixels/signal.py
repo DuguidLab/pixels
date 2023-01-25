@@ -33,7 +33,7 @@ def resample(array, from_hz, to_hz, poly=True, padtype=None):
 
     poly : bool, choose the resample function.
         If True, use scipy.signal.resample_poly; if False, use scipy.signal.resample.
-        Default is False.
+        Default is True.
         lfp downsampling only works if using scipy.signal.resample.
 
     Returns
