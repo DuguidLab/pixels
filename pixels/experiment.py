@@ -268,9 +268,13 @@ class Experiment:
 
         for m, mouse in enumerate(self.mouse_ids):
             info[mouse] = {}
-            for i, session in enumerate(self.sessions):
+            mouse_sessions = []
+            for session in self.sessions:
                 if mouse in session.name:
-                    info[mouse][i] = session.get_good_units_info()
+                    mouse_sessions.append(session)
+
+            for i, session in enumerate(mouse_sessions):
+                info[mouse][i] = session.get_good_units_info()
 
             long_df = pd.concat(
                 info[mouse],
@@ -337,14 +341,18 @@ class Experiment:
         waveform_metrics = {}
 
         for m, mouse in enumerate(self.mouse_ids):
+            mouse_sessions = []
             waveform_metrics[mouse] = {}
-            for i, session in enumerate(self.sessions):
+            for session in self.sessions:
                 if mouse in session.name:
-                    if units:
-                        if units[i]:
-                            waveform_metrics[mouse][i] = session.get_waveform_metrics(units=units[i])
-                    else:
-                        waveform_metrics[mouse][i] = session.get_waveform_metrics()
+                    mouse_sessions.append(session)
+
+            for i, session in enumerate(mouse_sessions):
+                if units:
+                    if units[i]:
+                        waveform_metrics[mouse][i] = session.get_waveform_metrics(units=units[i])
+                else:
+                    waveform_metrics[mouse][i] = session.get_waveform_metrics()
 
             long_df = pd.concat(
                 waveform_metrics[mouse],
