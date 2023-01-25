@@ -2098,7 +2098,7 @@ class Behaviour(ABC):
 
 
     @_cacheable
-    def get_waveform_metrics(self, units=None, window=20):
+    def get_waveform_metrics(self, units=None, window=20, upsampling_factor=10):
         """
         This func is a work-around of spikeinterface's equivalent:
         https://github.com/SpikeInterface/spikeinterface/blob/master/spikeinterface/postprocessing/template_metrics.py.
@@ -2130,11 +2130,12 @@ class Behaviour(ABC):
         output = {}
         for i, unit in enumerate(units):
             metrics = []
-            mean_waveform = waveforms[unit].median(axis=1)
+            #mean_waveform = waveforms[unit].mean(axis=1)
+            median_waveform = waveforms[unit].median(axis=1)
             # normalise mean waveform to remove variance caused by distance!
-            mean_waveform = mean_waveform / mean_waveform.abs().max()
+            norm_waveform = median_waveform / median_waveform.abs().max()
             #TODO: test! also can try clustering on normalised meann waveform
-            assert 0
+            mean_waveform = norm_waveform
 
             # time between trough to peak, in ms
             trough_idx = np.argmin(mean_waveform)
@@ -2201,6 +2202,8 @@ class Behaviour(ABC):
         df.columns = columns
         dtype = {"unit": int}
         df = df.astype(dtype)
+        # see which cols have nan
+        df.isnull().sum()
 
         return df
 
