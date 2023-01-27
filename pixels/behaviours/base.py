@@ -8,10 +8,13 @@ from __future__ import annotations
 import functools
 import json
 import os
+import glob
 import pickle
 import shutil
 import tarfile
 import tempfile
+import re
+import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
@@ -26,6 +29,9 @@ import scipy.stats
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
+import spikeinterface.curation as sc
+import spikeinterface.exporters as sexp
+import spikeinterface.postprocessing as spost
 from scipy import interpolate
 from tables import HDF5ExtError
 
@@ -132,12 +138,34 @@ class Behaviour(ABC):
 
         self.raw = self.data_dir / 'raw' / self.name
         self.processed = self.data_dir / 'processed' / self.name
+
+        ks_output = glob.glob(
+            str(self.processed) +'/' + f'sorted_stream_cat_[0-9]'
+        )
+        if not len(ks_output) == 0:
+            ks_output = Path(ks_output[0])
+            if not ((ks_output / 'phy_ks3').exists() and
+                    len(os.listdir(ks_output / 'phy_ks3'))>17): 
+                #if not (ks_output.exists() and
+                        #len(os.listdir(ks_output / ks_output))>17): 
+                self.ks_output = ks_output
+            else:
+                self.ks_output = ks_output / 'phy_ks3'
+        else:
+            self.ks_output = Path(glob.glob(
+                str(self.processed) +'/' + f'sorted_stream_[0-9]'
+            )[0])
+
         self.files = ioutils.get_data_files(self.raw, name)
 
         if interim_dir is None:
             self.interim = self.data_dir / 'interim' / self.name
         else:
             self.interim = Path(interim_dir) / self.name
+
+        self.CatGT_dir = glob.glob(
+            str(self.interim) +'/' + f'catgt_{self.name}_g[0-9]'
+        )
 
         self.interim.mkdir(parents=True, exist_ok=True)
         self.processed.mkdir(parents=True, exist_ok=True)
@@ -150,13 +178,14 @@ class Behaviour(ABC):
         self._lag = None
         self._use_cache = True
         self._cluster_info = None
+        self._good_unit_info = None
         self.drop_data()
 
         self.spike_meta = [
-            ioutils.read_meta(self.find_file(f['spike_meta'])) for f in self.files
+            ioutils.read_meta(self.find_file(f['spike_meta'], copy=False)) for f in self.files
         ]
         self.lfp_meta = [
-            ioutils.read_meta(self.find_file(f['lfp_meta'])) for f in self.files
+            ioutils.read_meta(self.find_file(f['lfp_meta'], copy=False)) for f in self.files
         ]
 
         # environmental variable PIXELS_CACHE={0,1} can be {disable,enable} cache
@@ -204,10 +233,18 @@ class Behaviour(ABC):
         """
         depth_file = self.processed / 'depth.txt'
         if not depth_file.exists():
-            msg = f": Can't load probe depth: please add it in um to processed/{self.name}/depth.txt"
+            depth_file = self.processed / self.files[0]["depth_info"]
+
+        if not depth_file.exists():
+            msg = f": Can't load probe depth: please add it in um to\
+            \nprocessed/{self.name}/depth.txt, or save it with other depth related\
+            \ninfo in {self.processed / self.files[0]['depth_info']}."
             raise PixelsError(msg)
-        with depth_file.open() as fd:
-            return [float(line) for line in fd.readlines()]
+        if Path(depth_file).suffix == ".txt":
+            with depth_file.open() as fd:
+                return [float(line) for line in fd.readlines()]
+        elif Path(depth_file).suffix == ".json":
+            return [json.load(open(depth_file, mode="r"))["clustering"]]
 
     def find_file(self, name: str, copy: bool=True) -> Optional[Path]:
         """
@@ -387,6 +424,7 @@ class Behaviour(ABC):
                 continue
 
             data_file = self.find_file(recording['spike_data'])
+            """
             orig_rate = self.spike_meta[rec_num]['imSampRate']
             num_chans = self.spike_meta[rec_num]['nSavedChans']
 
@@ -414,6 +452,7 @@ class Behaviour(ABC):
                 data = data[- lag_start:]
             data = pd.DataFrame(data[:, :-1])
             ioutils.write_hdf5(output, data)
+            """
 
     def process_lfp(self):
         """
@@ -474,36 +513,308 @@ class Behaviour(ABC):
             #downsampled = pd.DataFrame(downsampled)
             #ioutils.write_hdf5(output, downsampled)
 
-    def sort_spikes(self):
+    
+    def run_catgt(self, CatGT_app=None, args=None) -> None:
+        """
+        This func performs CatGT on copied AP data in the interim.
+
+        params
+        ====
+        data_dir: path, dir to interim data and catgt output.
+
+        catgt_app: path, dir to catgt software.
+
+        args: str, arguments in catgt.
+            default is None.
+        """
+        if CatGT_app == None:
+            CatGT_app = "~/CatGT3.4"
+        # move cwd to catgt
+        os.chdir(CatGT_app)
+
+        for rec_num, recording in enumerate(self.files):
+            # copy spike data to interim
+            self.find_file(recording['spike_data'])
+
+            # reset catgt args for current session
+            session_args = None
+
+            if len(self.CatGT_dir) != 0:
+                if len(os.listdir(self.CatGT_dir[0])) != 0:
+                    print(f"\nCatGT already performed on ap data of {self.name}. Next session.\n")
+                    continue
+
+            #TODO: finish this here so that catgt can run together with sorting
+            print(f"> Running CatGT on ap data of {self.name}")
+            #_dir = self.interim
+
+            if args == None:
+                args = f"-no_run_fld\
+                    -g=0,9\
+                    -t=0,9\
+                    -prb=0\
+                    -ap\
+                    -lf\
+                    -apfilter=butter,12,300,9000\
+                    -lffilter=butter,12,0.5,300\
+                    -xd=2,0,384,6,500\
+                    -gblcar\
+                    -gfix=0.2,0.1,0.02"
+
+            session_args = f"-dir={self.interim} -run={self.name} -dest={self.interim} " + args
+            print(f"\ncatgt args of {self.name}: \n{session_args}")
+
+            subprocess.run( ['./run_catgt.sh', session_args])
+
+
+    def load_recording(self):
+        try:
+            recording = si.load_extractor(self.interim / 'cache/recording.json')
+            concat_rec = recording
+            output = os.path.dirname(self.ks_output)
+            return recording, output
+
+        except:
+            for _, files in enumerate(self.files):
+                try:
+                    print("\n> Getting catgt-ed recording...")
+                    self.CatGT_dir = Path(self.CatGT_dir[0])
+                    data_dir = self.CatGT_dir
+                    data_file = data_dir / files['catGT_ap_data']
+                    metadata = data_dir / files['catGT_ap_meta']
+                except:
+                    print(f"\n> Getting the orignial recording...")
+                    data_file = self.find_file(files['spike_data'])
+                    metadata = self.find_file(files['spike_meta'])
+
+            assert 0
+            stream_id = data_file.as_posix()[-12:-4]
+            if stream_id not in streams:
+                streams[stream_id] = metadata
+
+            for stream_num, stream in enumerate(streams.items()):
+                stream_id, metadata = stream
+                # find spike sorting output folder
+                if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
+                    output = self.processed / f'sorted_stream_cat_{stream_num}'
+                else:
+                    output = self.processed / f'sorted_stream_{stream_num}'
+
+                try:
+                    recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
+                except ValueError as e:
+                    raise PixelsError(
+                        f"Did the raw data get fully copied to interim? Full error: {e}\n"
+                    )
+
+                # this recording is filtered
+                recording.annotate(is_filtered=True)
+
+                # concatenate recording segments
+                concat_rec = si.concatenate_recordings([recording])
+                probe = pi.read_spikeglx(metadata.as_posix())
+                concat_rec = concat_rec.set_probe(probe)
+                # annotate spike data is filtered
+                concat_rec.annotate(is_filtered=True)
+
+        return concat_rec, output
+
+
+    def sort_spikes(self, CatGT_app=None, old=False):
         """
         Run kilosort spike sorting on raw spike data.
         """
         streams = {}
+        # set chunks for spikeinterface operations
+        job_kwargs = dict(
+            n_jobs=10, # -1: num of job equals num of cores
+            chunk_duration="1s",
+            progress_bar=True,
+        )
 
-        for rec_num, files in enumerate(self.files):
-            data_file = self.find_file(files['spike_data'])
-            assert data_file, f"Spike data not found for {files['spike_data']}."
+        concat_rec, output = self.load_recording()
 
-            stream_id = data_file.as_posix()[-12:-4]
-            if stream_id not in streams:
+        assert 0
+        #TODO: see if ks can run normally now using load_recording()
+        for _, files in enumerate(self.files):
+            if not CatGT_app == None:
+                self.run_catgt(CatGT_app=CatGT_app)
+
+                print("\n> Sorting catgt-ed spikes\n")
+                self.CatGT_dir = Path(self.CatGT_dir[0])
+                data_file = self.CatGT_dir / files['catGT_ap_data']
+                metadata = self.CatGT_dir / files['catGT_ap_meta']
+            else:
+                print(f"\n> using the orignial spike data.\n")
+                data_file = self.find_file(files['spike_data'])
                 metadata = self.find_file(files['spike_meta'])
-                streams[stream_id] = metadata
+
+        stream_id = data_file.as_posix()[-12:-4]
+        if stream_id not in streams:
+            streams[stream_id] = metadata
 
         for stream_num, stream in enumerate(streams.items()):
             stream_id, metadata = stream
+            # find spike sorting output folder
+            if len(re.findall('_t[0-9]+', data_file.as_posix())) == 0:
+                output = self.processed / f'sorted_stream_cat_{stream_num}'
+            else:
+                output = self.processed / f'sorted_stream_{stream_num}'
+
+            # check if already sorted and exported
+            for_phy = output / "phy_ks3"
+            if not for_phy.exists() or not len(os.listdir(for_phy)) > 1:
+                print("> Not sorted or exported yet, start from spike sorting...\n")
+            else:
+                print("> Already sorted and exported, next session...\n")
+                continue
+
             try:
-                recording = se.SpikeGLXRecordingExtractor(self.interim, stream_id=stream_id)
+                recording = se.SpikeGLXRecordingExtractor(self.CatGT_dir, stream_id=stream_id)
+                # this recording is filtered
+                recording.annotate(is_filtered=True)
             except ValueError as e:
                 raise PixelsError(
-                    f"Did the raw data get fully copied to interim? Full error: {e}"
+                    f"Did the raw data get fully copied to interim? Full error: {e}\n"
                 )
 
-            print("> Running kilosort")
-            output = self.processed / f'sorted_stream_{stream_num}'
+            # concatenate recording segments
             concat_rec = si.concatenate_recordings([recording])
             probe = pi.read_spikeglx(metadata.as_posix())
             concat_rec = concat_rec.set_probe(probe)
-            ss.run_kilosort3(recording=concat_rec, output_folder=output)
+            # annotate spike data is filtered
+            concat_rec.annotate(is_filtered=True)
+
+            if old:
+                print("\n> loading old kilosort 3 results to spikeinterface")
+                sorting = se.read_kilosort(old_ks_output_dir) # avoid re-sort old
+                # remove empty units
+                ks3_output = sorting.remove_empty_units()
+                print(f"> KS3 removed\
+                        \n{len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                        empty units.\n")
+            else:
+                try: 
+                    ks3_output = si.load_extractor(output / 'saved_si_sorting_obj')
+                    print("> This session is already sorted, now it is loaded.\n") 
+
+                    """
+                    # for testing: get first 5 mins of the recording 
+                    fs = concat_rec.get_sampling_frequency()
+                    test = concat_rec.frame_slice(
+                        start_frame=0*fs,
+                        end_frame=300*fs,
+                    )
+                    test.annotate(is_filtered=True)
+                    # check all annotations
+                    test.get_annotation('is_filtered')
+                    print(test)
+                    """
+
+                except:
+                    print("> Running kilosort\n")
+                    print(f"> Now is sorting: \n{concat_rec}\n")
+                    #ks3_output = ss.run_kilosort3(recording=concat_rec, output_folder=output)
+                    sorting = ss.run_sorter(
+                        sorter_name='kilosort3',
+                        recording=concat_rec, #recording=test, # for testing
+                        output_folder=output,
+                        #remove_existing_folder=False,
+                        **job_kwargs,
+                    )
+
+                    # remove empty units
+                    ks3_output = sorting.remove_empty_units()
+                    print(f"> KS3 removed\
+                            \n{len(sorting.get_unit_ids()) - len(ks3_output.get_unit_ids())}\
+                            empty units.\n")
+
+                    """
+                    #TODO: remove duplicated spikes from spike train, only in >0.96.1 si
+                    ks3_output = sc.remove_duplicated_spikes(
+                        sorting=ks3_no_empt,
+                        censored_period_ms=0.3, #ms
+                        method='keep_first', # keep first spike, remove the second
+                    )
+                    """
+                    # save spikeinterface sorting object for easier loading
+                    ks3_output.save(folder=output / 'saved_si_sorting_obj')
+
+            #TODO: toggle load_if_exists=True & overwrite=False should replace
+            #...load_from_folder.
+            try:
+                waveforms = si.WaveformExtractor.load_from_folder(
+                    folder=self.interim / 'cache',
+                    sorting=ks3_output,
+                )
+                print("> Waveforms extracted, now it is loaded.\n")
+            except:
+                print("> Waveforms not extracted, extracting now.\n")
+                # extract waveforms
+                waveforms = si.extract_waveforms(
+                    recording=concat_rec, #recording=test, # for testing
+                    sorting=ks3_output,
+                    folder=self.interim / 'cache',
+                    #load_if_exists=True, # load extracted if available
+                    load_if_exists=False, # re-calculate everytime
+                    max_spikes_per_unit=500, # None will extract all waveforms
+                    ms_before=2.0, # time before trough 
+                    ms_after=3.0, # time after trough 
+                    #overwrite=False,
+                    overwrite=True,
+                    **job_kwargs,
+                )
+
+            """
+            # TODO: remove redundant units by keeping minimum shift, highest_amplitude, or
+            # max_spikes
+            ks3_output = sc.remove_redundant_units(
+                waveforms, # spike trains realigned using the peak shift in template
+                duplicate_threshold=0.9, # default is 0.8
+                remove_strategy='minimum_shift', # keep unit with best peak alignment
+            )
+            """
+            # export to phy, with pc feature calculated.
+            # copy recording.dat to output so that individual waveforms can be
+            # seen in waveformview.
+            print("\n> Exporting parameters for phy...\n")
+            sexp.export_to_phy(
+                waveform_extractor=waveforms,
+                output_folder=for_phy,
+                compute_pc_features=True, # pca
+                compute_amplitudes=True,
+                copy_binary=True,
+                #remove_if_exists=True, # overwrite everytime
+                remove_if_exists=False, # load if already exists
+                **job_kwargs,
+            )
+            print(f"> Parameters for manual curation saved to {for_phy}.\n")
+
+            correct_kslabels = for_phy / "cluster_KSLabel.tsv"
+            if correct_kslabels.exists():
+                print(f"\nCorrect KS labels already saved in {correct_kslabels}. Next session.\n")
+                continue
+
+            print("\n> Getting all KS labels...")
+            all_ks_labels = pd.read_csv(
+                output / "cluster_KSLabel.tsv",
+                sep='\t',
+            )
+            print("\n> Finding cluster ids from spikeinterface output...")
+            new_clus_ids = pd.read_csv(
+                for_phy / "cluster_si_unit_ids.tsv",
+                sep='\t',
+            )
+            units = new_clus_ids.si_unit_id.to_list()
+
+            print("\n> Saving correct ks labels...")
+            selected_kslabels = all_ks_labels.iloc[units].reset_index(drop=True)
+            selected_kslabels.loc[:, "cluster_id"] = [i for i in range(new_clus_ids.shape[0])]
+            selected_kslabels.to_csv(
+                correct_kslabels,
+                sep='\t',
+                index=False,
+            )
 
 
     def extract_videos(self, force=False):
@@ -852,6 +1163,7 @@ class Behaviour(ABC):
 
                 # Get MIs
                 avi = self.interim / video.with_suffix('.avi')
+                #TODO: how to load recording
                 rec_rois, roi_file = ses_rois[(rec_num, v)]
                 rec_mi = signal.motion_index(avi, rec_rois)
 
@@ -1099,14 +1411,19 @@ class Behaviour(ABC):
         """
         return self._get_processed_data("_lfp_data", "lfp_processed")
 
-    def _get_spike_times(self):
+    def _get_spike_times(self, catgt=False):
         """
         Returns the sorted spike times.
         """
         saved = self._spike_times_data
         if saved[0] is None:
-            times = self.processed / f'sorted_stream_0' / 'spike_times.npy'
-            clust = self.processed / f'sorted_stream_0' / 'spike_clusters.npy'
+            # TODO: temporarily add catgt arg here, 
+            if catgt:
+                stream = 'sorted_stream_cat_0'
+            else:
+                stream = 'sorted_stream_0'
+            times = self.processed / stream / f'spike_times.npy'
+            clust = self.processed / stream / f'spike_clusters.npy'
 
             try:
                 times = np.load(times)
@@ -1120,8 +1437,18 @@ class Behaviour(ABC):
             by_clust = {}
 
             for c in np.unique(clust):
-                by_clust[c] = pd.Series(times[clust == c]).drop_duplicates()
+                c_times = times[clust == c]
+                uniques, counts = np.unique(
+                    c_times,
+                    return_counts=True,
+                )
+                repeats = c_times[np.where(counts>1)]
+                if len(repeats>1):
+                    print(f"> removed {len(repeats)} double-counted spikes from cluster {c}.")
+
+                by_clust[c] = pd.Series(uniques)
             saved[0]  = pd.concat(by_clust, axis=1, names=['unit'])
+            assert 0
         return saved[0]
 
     def _get_aligned_spike_times(
@@ -1290,7 +1617,7 @@ class Behaviour(ABC):
 
                 # and that are within the specified depth range
                 if min_depth is not None:
-                    if probe_depth - unit_info['depth'] < min_depth:
+                    if probe_depth - unit_info['depth'] <= min_depth:
                         continue
                 if max_depth is not None:
                     if probe_depth - unit_info['depth'] > max_depth:
@@ -1600,7 +1927,9 @@ class Behaviour(ABC):
 
     def get_cluster_info(self):
         if self._cluster_info is None:
-            info_file = self.processed / 'sorted_stream_0' / 'cluster_info.tsv'
+            info_file = self.ks_output / 'cluster_info.tsv'
+            print(f"> got cluster info at {info_file}\n")
+
             try:
                 info = pd.read_csv(info_file, sep='\t')
             except FileNotFoundError:
@@ -1608,6 +1937,19 @@ class Behaviour(ABC):
                 raise PixelsError(self.name + msg)
             self._cluster_info = info
         return self._cluster_info
+
+    def get_good_units_info(self):
+        if self._good_unit_info is None:
+            info_file = self.interim / 'good_units_info.tsv'
+            print(f"> got good unit info at {info_file}\n")
+
+            try:
+                info = pd.read_csv(info_file, sep='\t')
+            except FileNotFoundError:
+                msg = ": Can't load cluster info. Did you export good unit info for this session yet?"
+                raise PixelsError(self.name + msg)
+            self._good_unit_info = info
+        return self._good_unit_info
 
     @_cacheable
     def get_spike_widths(self, units=None):
@@ -1641,45 +1983,230 @@ class Behaviour(ABC):
         return df
 
     @_cacheable
-    def get_spike_waveforms(self, units=None):
-        from phylib.io.model import load_model
-        from phylib.utils.color import selected_cluster_color
+    def get_spike_waveforms(self, units=None, method='phy'):
+        """
+        Extracts waveforms of spikes.
+        method: str, name of selected method.
+            'phy' (default)
+            'spikeinterface'
+        """
+        if method == 'phy':
+            from phylib.io.model import load_model
+            from phylib.utils.color import selected_cluster_color
 
-        if units:
-            # defer to getting waveforms for all units
-            waveforms = self.get_spike_waveforms()[units]
-            assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
+            if units:
+                # defer to getting waveforms for all units
+                waveforms = self.get_spike_waveforms()[units]
+                assert list(waveforms.columns.get_level_values("unit").unique()) == list(units)
+                return waveforms
+
+            units = self.select_units()
+
+            #paramspy = self.processed / 'sorted_stream_0' / 'params.py'
+            paramspy = self.ks_output / 'params.py'
+            if not paramspy.exists():
+                raise PixelsError(f"{self.name}: params.py not found")
+            model = load_model(paramspy)
+            rec_forms = {}
+
+            for u, unit in enumerate(units):
+                print(f"{round(100 * u / len(units), 2)}% complete")
+                # get the waveforms from only the best channel
+                spike_ids = model.get_cluster_spikes(unit)
+                best_chan = model.get_cluster_channels(unit)[0]
+                u_waveforms = model.get_waveforms(spike_ids, [best_chan])
+                if u_waveforms is None:
+                    raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
+                rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+
+            assert rec_forms
+
+            df = pd.concat(
+                rec_forms,
+                axis=1,
+                names=['unit', 'spike']
+            )
+            # convert indexes to ms
+            rate = 1000 / int(self.spike_meta[0]['imSampRate'])
+            df.index = df.index * rate
+            return df
+
+        #TODO: implement spikeinterface waveform extraction
+        elif method == 'spikeinterface':
+            # set chunks
+            job_kwargs = dict(
+                n_jobs=10, # -1: num of job equals num of cores
+                chunk_duration="1s",
+                progress_bar=True,
+            )
+            recording, _ = self.load_recording()
+            try:
+                sorting = se.read_kilosort(self.ks_output)
+            except ValueError as e:
+                raise PixelsError(
+                    f"Can't load sorting object. Did you delete cluster_info.csv? Full error: {e}\n"
+                )
+
+            # check last modified time of cache, and create time of ks_output
+            try:
+                template_cache_mod_time = os.path.getmtime(self.interim /
+                                                           'cache/templates_average.npy')
+                ks_mod_time = os.path.getmtime(self.ks_output / 'cluster_info.tsv')
+                assert template_cache_mod_time < ks_mod_time
+                check = True # re-extract waveforms
+                print("> Re-extracting waveforms since kilosort output is newer.") 
+            except:
+                if 'template_cache_mod_time' in locals():
+                    print("> Loading existing waveforms.") 
+                    check = False # load existing waveforms
+                else:
+                    print("> Extracting waveforms since they are not extracted.") 
+                    check = True # re-extract waveforms
+
+            """
+            # for testing: get first 5 mins of the recording 
+            fs = concat_rec.get_sampling_frequency()
+            test = concat_rec.frame_slice(
+                start_frame=0*fs,
+                end_frame=300*fs,
+            )
+            test.annotate(is_filtered=True)
+            # check all annotations
+            test.get_annotation('is_filtered')
+            print(test)
+            """
+
+            # extract waveforms
+            waveforms = si.extract_waveforms(
+                recording=recording,
+                sorting=sorting,
+                folder=self.interim / 'cache',
+                load_if_exists=not(check), # maybe re-extracted
+                max_spikes_per_unit=500, # None will extract all waveforms
+                ms_before=2.0, # time before trough 
+                ms_after=3.0, # time after trough 
+                overwrite=check, # overwrite depends on check
+                **job_kwargs,
+            )
+            #TODO: use cache to export the results?
+
             return waveforms
 
-        units = self.select_units()
+        else:
+            raise PixelsError(f"{self.name}: waveform extraction method {method} is\
+                              not implemented!")
 
-        paramspy = self.processed / 'sorted_stream_0' / 'params.py'
-        if not paramspy.exists():
-            raise PixelsError(f"{self.name}: params.py not found")
-        model = load_model(paramspy)
-        rec_forms = {}
 
-        for u, unit in enumerate(units):
-            print(100 * u / len(units), "% complete")
-            # get the waveforms from only the best channel
-            spike_ids = model.get_cluster_spikes(unit)
-            best_chan = model.get_cluster_channels(unit)[0]
-            u_waveforms = model.get_waveforms(spike_ids, [best_chan])
-            if u_waveforms is None:
-                raise PixelsError(f"{self.name}: unit {unit} - waveforms not read")
-            rec_forms[unit] = pd.DataFrame(np.squeeze(u_waveforms).T)
+    @_cacheable
+    def get_waveform_metrics(self, units=None, window=20, upsampling_factor=10):
+        """
+        This func is a work-around of spikeinterface's equivalent:
+        https://github.com/SpikeInterface/spikeinterface/blob/master/spikeinterface/postprocessing/template_metrics.py.
+        dec 23rd 2022: motivation to write this function is that spikeinterface
+        0.96.1 cannot load sorting object from `export_to_phy` output folder, i.e., i
+        cannot get updated clusters/units and their waveforms, which is a huge
+        problem for subsequent analyses e.g. unit type clustering.
 
-        assert rec_forms
+        To learn more about waveform metrics, see
+        https://github.com/AllenInstitute/ecephys_spike_sorting/tree/master/ecephys_spike_sorting/modules/mean_waveforms
+        and https://journals.physiology.org/doi/full/10.1152/jn.00680.2018.
 
-        df = pd.concat(
-            rec_forms,
-            axis=1,
-            names=['unit', 'spike']
-        )
-        # convert indexes to ms
-        rate = 1000 / int(self.spike_meta[0]['imSampRate'])
-        df.index = df.index * rate
+        """
+        if units:
+            # Always defer to getting waveform metrics for all good units, so we only
+            # ever have to calculate metrics for each once.
+            wave_metrics = self.get_waveform_metrics()
+            return wave_metrics.loc[wave_metrics.unit.isin(units)]
+
+        columns = ["unit", "trough_to_peak", "trough_peak_ratio", "half_width",
+                   "repolarisation_slope", "recovery_slope"]
+        print(f"> Calculating waveform metrics {columns[1:]}...\n")
+
+        waveforms = self.get_spike_waveforms()
+        # remove nan values
+        waveforms.dropna()
+        units = waveforms.columns.get_level_values('unit').unique()
+
+        output = {}
+        for i, unit in enumerate(units):
+            metrics = []
+            #mean_waveform = waveforms[unit].mean(axis=1)
+            median_waveform = waveforms[unit].median(axis=1)
+            # normalise mean waveform to remove variance caused by distance!
+            norm_waveform = median_waveform / median_waveform.abs().max()
+            #TODO: test! also can try clustering on normalised meann waveform
+            mean_waveform = norm_waveform
+
+            # time between trough to peak, in ms
+            trough_idx = np.argmin(mean_waveform)
+            peak_idx = trough_idx + np.argmax(mean_waveform.iloc[trough_idx:])
+            if peak_idx == 0:
+                raise PixelsError(f"> Cannot find peak in mean waveform.\n")
+            if trough_idx == 0:
+                raise PixelsError(f"> Cannot find trough in mean waveform.\n")
+            trough_to_peak = mean_waveform.index[peak_idx] - mean_waveform.index[trough_idx]
+            metrics.append(trough_to_peak)
+
+            # trough to peak ratio
+            trough_peak_ratio = mean_waveform.iloc[peak_idx] / mean_waveform.iloc[trough_idx]
+            metrics.append(trough_peak_ratio)
+
+            # spike half width, in ms
+            half_amp = mean_waveform.iloc[trough_idx] / 2
+            idx_pre_half = np.where(mean_waveform.iloc[:trough_idx] < half_amp)
+            idx_post_half = np.where(mean_waveform.iloc[trough_idx:] < half_amp)
+            # last occurence of mean waveform amp lower than half amp, before trough
+            if len(idx_pre_half[0]) == 0:
+                idx_pre_half = trough_idx - 1
+                time_pre_half = mean_waveform.index[idx_pre_half]
+            else:
+                time_pre_half = mean_waveform.iloc[idx_pre_half[0] - 1].index[0]
+            # first occurence of mean waveform amp lower than half amp, after trough
+            time_post_half = mean_waveform.iloc[idx_post_half[0] + 1 +
+                                                trough_idx].index[-1]
+            half_width = time_post_half - time_pre_half
+            metrics.append(half_width)
+
+            # repolarisation slope
+            returns = np.where(mean_waveform.iloc[trough_idx:] >= 0) + trough_idx
+            if len(returns[0]) == 0:
+                print(f"> The mean waveformrns never returned to baseline?\n")
+                return_idx = mean_waveform.shape[0] - 1
+            else:
+                return_idx = returns[0][0]
+                if return_idx - trough_idx < 2:
+                    raise PixelsError(f"> The mean waveform returns to baseline too quickly,\
+                                      \ndoes not make sense...\n")
+            repo_period = mean_waveform.iloc[trough_idx:return_idx]
+            repo_slope = scipy.stats.linregress(
+                x=repo_period.index.values, # time in ms
+                y=repo_period.values, # amp
+             ).slope
+            metrics.append(repo_slope)
+
+            # recovery slope during user-defined recovery period
+            recovery_end_idx = peak_idx + window
+            recovery_end_idx = np.min([recovery_end_idx, mean_waveform.shape[0]])
+            reco_period = mean_waveform.iloc[peak_idx:recovery_end_idx]
+            reco_slope = scipy.stats.linregress(
+                x=reco_period.index.values, # time in ms
+                y=reco_period.values, # amp
+             ).slope
+            metrics.append(reco_slope)
+
+            # save metrics in output dictionary, key is unit id
+            output[unit] = metrics
+
+        # save all template metrics as dataframe
+        df = pd.DataFrame(output).T.reset_index()
+        df.columns = columns
+        dtype = {"unit": int}
+        df = df.astype(dtype)
+        # see which cols have nan
+        df.isnull().sum()
+
         return df
+
 
     @_cacheable
     def get_aligned_spike_rate_CI(

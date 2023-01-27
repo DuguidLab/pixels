@@ -116,12 +116,12 @@ class Experiment:
                    .format(session.name, i + 1, len(self.sessions)))
             session.process_spikes()
 
-    def sort_spikes(self):
+    def sort_spikes(self, CatGT_app=None):
         """ Extract the spikes from raw spike data for all sessions.  """
         for i, session in enumerate(self.sessions):
             print(">>>>> Sorting spikes for session {} ({} / {})"
                    .format(session.name, i + 1, len(self.sessions)))
-            session.sort_spikes()
+            session.sort_spikes(CatGT_app=CatGT_app)
 
     def assess_noise(self):
         """
@@ -259,6 +259,40 @@ class Experiment:
         """
         return [s.get_cluster_info() for s in self.sessions]
 
+    def get_good_units_info(self):
+        """
+        Get some basic high-level information for each good unit. This is mostly just the
+        information seen in the table in phy, plus their region.
+        """
+        info = {}
+
+        for m, mouse in enumerate(self.mouse_ids):
+            info[mouse] = {}
+            mouse_sessions = []
+            for session in self.sessions:
+                if mouse in session.name:
+                    mouse_sessions.append(session)
+
+            for i, session in enumerate(mouse_sessions):
+                info[mouse][i] = session.get_good_units_info()
+
+            long_df = pd.concat(
+                info[mouse],
+                axis=0,
+                names=["session", "unit_idx"],
+            )
+            info[mouse] = long_df
+
+        info_per_mouse = info
+
+        info_pooled = pd.concat(
+            info, axis=0, copy=False,
+            keys=info.keys(),
+            names=["mouse", "session", "unit_idx"],
+        )
+
+        return info_per_mouse, info_pooled
+
     def get_spike_widths(self, units=None):
         """
         Get the widths of spikes for units matching the specified criteria.
@@ -298,6 +332,46 @@ class Experiment:
             names=["session"]
         )
         return df
+
+    def get_waveform_metrics(self, units=None):
+        """
+        Get waveform metrics of mean waveform for units matching the specified
+        criteria; separated by mouse.
+        """
+        waveform_metrics = {}
+
+        for m, mouse in enumerate(self.mouse_ids):
+            mouse_sessions = []
+            waveform_metrics[mouse] = {}
+            for session in self.sessions:
+                if mouse in session.name:
+                    mouse_sessions.append(session)
+
+            for i, session in enumerate(mouse_sessions):
+                if units:
+                    if units[i]:
+                        waveform_metrics[mouse][i] = session.get_waveform_metrics(units=units[i])
+                else:
+                    waveform_metrics[mouse][i] = session.get_waveform_metrics()
+
+            long_df = pd.concat(
+                waveform_metrics[mouse],
+                axis=0,
+                names=["session", "unit_idx"],
+            )
+            # drop nan rows
+            long_df.dropna(inplace=True)
+            waveform_metrics[mouse] = long_df
+
+        waveform_metrics_per_mouse = waveform_metrics
+
+        waveform_metrics_pooled = pd.concat(
+            waveform_metrics, axis=0, copy=False,
+            keys=waveform_metrics.keys(),
+            names=["mouse", "session", "unit_idx"],
+        )
+
+        return waveform_metrics_per_mouse, waveform_metrics_pooled
 
     def get_aligned_spike_rate_CI(self, *args, units=None, **kwargs):
         """
